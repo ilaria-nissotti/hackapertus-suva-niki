@@ -134,7 +134,7 @@ def test_model_answer_fallback_is_logged_with_its_reason(client, case, caplog):
             caplog.at_level(logging.INFO):
         client.post("/conversation/ask", json={"case": case, "lang": "de", "question": "Q?"})
     line, = [m for m in messages(caplog, "conversation") if m.startswith("conversation_answer_fallback")]
-    assert "kind='verdict'" in line and "Unexpected answer classification" in line
+    assert "kind=invalid" in line and "Unexpected answer classification" in line
     assert "Invented answer" not in caplog.text
 
 
@@ -212,3 +212,21 @@ def test_parse_run_is_summarised(repo, caplog):
 @pytest.mark.parametrize("level", ["debug", "WARNING", "", "LOUD"])
 def test_configure_logging_accepts_any_log_level_value(level):
     configure_logging({"LOG_LEVEL": level})  # an unknown value falls back to INFO instead of crashing
+
+
+@pytest.mark.parametrize("kind", ["Hat meine Mandantin Anspruch auf eine Rente?", ["Frage"], {"q": "Frage"}, 42])
+def test_answer_fallback_never_logs_a_model_kind_that_echoes_the_question(client, case, caplog, kind):
+    with patch("conversation.model_config", return_value=CONFIG), \
+            patch("conversation.ask", return_value={"kind": kind, "answer": "x", "evidence_ids": []}), \
+            caplog.at_level(logging.INFO):
+        client.post("/conversation/ask", json={"case": case, "lang": "de", "question": "Hat meine Mandantin Anspruch?"})
+    line, = [m for m in messages(caplog, "conversation") if m.startswith("conversation_answer_fallback")]
+    assert "kind=invalid" in line and "Mandantin" not in caplog.text and "Frage" not in caplog.text
+
+
+def test_answer_fallback_keeps_a_known_kind(client, case, caplog):
+    with patch("conversation.model_config", return_value=CONFIG), \
+            patch("conversation.ask", return_value={"kind": "court", "answer": "x", "evidence_ids": []}), \
+            caplog.at_level(logging.INFO):
+        client.post("/conversation/ask", json={"case": case, "lang": "de", "question": "Q?"})
+    assert "conversation_answer_fallback case=" in caplog.text and "kind=court reason=Court answer without evidence." in caplog.text

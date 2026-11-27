@@ -123,7 +123,9 @@ invented findings, cross-case claims, or actions. History is context only.""",
             label = "App-Bewertung" if lang == "de" else "Score de l’application"
             answer = bounded(f"{label} ({rating['score']}/100). {answer}", MAX_ANSWER)
     except (ValueError, KeyError) as exc:
-        log.info("conversation_answer_fallback case=%s kind=%r reason=%s", record.get("key"), kind, exc)
+        # The model's own fields can echo the question: log only a known kind and our own reason text.
+        log.info("conversation_answer_fallback case=%s kind=%s reason=%s", record.get("key"),
+                 kind if kind in ("court", "score", "uncertain") else "invalid", exc)
         answer = ("Das lässt sich anhand dieses Urteils nicht verlässlich beantworten."
                   if lang == "de" else "Ce jugement ne permet pas de répondre de manière fiable.")
         kind, evidence = "uncertain", []
