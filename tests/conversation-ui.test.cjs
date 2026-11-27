@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const {readFileSync} = require("node:fs");
 const {runInNewContext} = require("node:vm");
 
-function setup({denyMic = false, blockAutoplay = false, request} = {}) {
+function setup({denyMic = false, blockAutoplay = false, request, recording} = {}) {
   class Element {
     constructor() { this.events = {}; this.children = []; this.attrs = {}; this.value = ""; }
     addEventListener(name, handler) { this.events[name] = handler; }
@@ -32,7 +32,7 @@ function setup({denyMic = false, blockAutoplay = false, request} = {}) {
     start() { this.state = "recording"; }
     stop() {
       this.state = "inactive";
-      this.ondataavailable({data: new Blob(["recording"])});
+      this.ondataavailable({data: recording ?? new Blob(["recording"])});
       this.onstop();
     }
   }
@@ -56,6 +56,7 @@ function setup({denyMic = false, blockAutoplay = false, request} = {}) {
       const payload = action === "transcribe" ? options.body : JSON.parse(options.body);
       calls.push({action, payload, signal: options.signal});
       const data = request ? await request(action) : undefined;
+      if (data instanceof Error) throw data;  // a dropped connection rejects fetch
       if (data?.error) return {ok: false, async json() { return data; }};
       const defaults = {transcribe: {transcript: "Was entschied das Gericht?"},
         ask: {kind: "court", answer: "Die Beschwerde war unzulässig.", citations: [{id:"2", text:"Quelle"}]},
@@ -161,4 +162,98 @@ test("provider failures allow another recording or playback retry", async () => 
   await ui.byId("chat-recap").click();
   assert.match(ui.byId("chat-status").textContent, /Provider unavailable/);
   assert.equal(ui.byId("chat-recap").disabled, false);
+});
+
+test("limit: an empty or over-3 MB recording is refused before any upload", async () => {
+  for (const recording of [new Blob([]), new Blob([new Uint8Array(3 * 1024 * 1024 + 1)])]) {
+    const ui = setup({recording});
+    await ui.record();
+    await flush();
+    assert.deepEqual(actions(ui), []);
+    assert.match(ui.byId("chat-status").textContent, /under 3 MB/);
+    assert.equal(ui.byId("chat-mic").disabled, false);  // the user can record again
+  }
+});
+
+test("limit: a recording of exactly 3 MB is uploaded", async () => {
+  const ui = setup({recording: new Blob([new Uint8Array(3 * 1024 * 1024)])});
+  await ui.record();
+  await flush();
+  assert.deepEqual(actions(ui), ["transcribe", "ask", "speak"]);
+});
+
+test("limit: only the last six turns are kept and sent as history", async () => {
+  const ui = setup();
+  for (let i = 0; i < 8; i++) { await ui.record(); await flush(); }
+  assert.equal(ui.byId("chat-turns").children.length, 6);
+  const asks = ui.calls.filter(call => call.action === "ask");
+  assert.equal(asks.length, 8);
+  assert.equal(asks.at(-1).payload.history.length, 6);
+});
+
+test("duplicate: clicking Generate summary twice while it runs sends one recap request", async () => {
+  let finish;
+  const ui = setup({request: action => action === "recap" ? new Promise(resolve => { finish = resolve; }) : undefined});
+  await ui.record();
+  await flush();
+  const first = ui.byId("chat-recap").click();
+  ui.byId("chat-recap").click();
+  ui.byId("chat-recap").click();
+  assert.equal(actions(ui).filter(a => a === "recap").length, 1);
+  finish({points: ["Ausgang"], takeaways: [], open_questions: [], citations: []});
+  await first;
+  assert.equal(ui.byId("chat-recap").disabled, false);
+});
+
+test("duplicate: the mic ignores a new call while an answer is pending", async () => {
+  let finish;
+  const ui = setup({request: action => action === "ask" ? new Promise(resolve => { finish = resolve; }) : undefined});
+  await ui.record();
+  await flush();
+  await ui.byId("chat-mic").click();  // busy: must not open a second recording
+  assert.deepEqual(actions(ui), ["transcribe", "ask"]);
+  assert.equal(ui.tracks(), 1);
+  finish();
+  await flush();
+  assert.deepEqual(actions(ui), ["transcribe", "ask", "speak"]);
+});
+
+test("out of order: a recap that returns after Clear is discarded", async () => {
+  let finish;
+  const ui = setup({request: action => action === "recap" ? new Promise(resolve => { finish = resolve; }) : undefined});
+  await ui.record();
+  await flush();
+  const pending = ui.byId("chat-recap").click();
+  await ui.byId("chat-clear").click();
+  finish({points: ["Late"], takeaways: [], open_questions: [], citations: []});
+  await pending;
+  await flush();
+  assert.equal(ui.byId("chat-recap-result").children.length, 0);
+  assert.equal(ui.byId("chat-turns").children.length, 0);
+  assert.equal(ui.byId("chat-recap").disabled, true);
+});
+
+test("out of order: a transcript that returns after Clear never becomes a question", async () => {
+  let finish;
+  const ui = setup({request: action => action === "transcribe" ? new Promise(resolve => { finish = resolve; }) : undefined});
+  await ui.record();
+  await ui.byId("chat-clear").click();
+  finish({transcript: "Late question"});
+  await flush();
+  assert.deepEqual(actions(ui), ["transcribe"]);
+  assert.equal(ui.byId("chat-turns").children.length, 0);
+});
+
+test("network: a dropped connection shows the error and the next attempt works", async () => {
+  let drop = true;
+  const ui = setup({request: action => action === "ask" && drop ? new TypeError("Failed to fetch") : undefined});
+  await ui.record();
+  await flush();
+  assert.equal(ui.byId("chat-status").textContent, "Failed to fetch");
+  assert.equal(ui.byId("chat-turns").children.length, 0);
+  assert.equal(ui.byId("chat-mic").disabled, false);
+  drop = false;
+  await ui.record();
+  await flush();
+  assert.equal(ui.byId("chat-turns").children.length, 1);
 });
