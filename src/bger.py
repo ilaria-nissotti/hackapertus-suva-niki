@@ -8,6 +8,7 @@ from dataclasses import replace
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
+import httpx
 from openai import APIError
 
 from suva.config import load_settings
@@ -32,7 +33,12 @@ def model_config():
     base_url = settings.llm_base_url.rstrip("/")
     if not base_url or not settings.llm_name:
         raise ValueError("Configure LLM_BASE_URL and LLM_NAME for Apertus")
-    parsed = urlsplit(base_url)
+    try:
+        parsed = urlsplit(base_url)
+        parsed.port  # raises ValueError for a port such as "bogus"
+        httpx.URL(base_url)  # the client library's own parser, so a URL accepted here cannot fail later
+    except (ValueError, httpx.InvalidURL):
+        raise ValueError("LLM_BASE_URL is not a valid URL") from None
     if not parsed.hostname or (parsed.scheme != "https" and not (
         parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
     )):

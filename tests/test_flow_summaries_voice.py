@@ -212,6 +212,29 @@ def test_model_config_rejects_bad_endpoints(url, name, error):
         bger.model_config()
 
 
+@pytest.mark.parametrize("url", ["https://localhost:bogus/v1", "https://[::1/v1", "https://api.example.test:99999/v1",
+                                 "https://api.example.test:-1/v1"])
+def test_model_config_rejects_urls_the_client_cannot_use(url, tmp_path):
+    from conftest import make_settings
+
+    with patch("bger.load_settings", return_value=make_settings(tmp_path, LLM_BASE_URL=url)), \
+            pytest.raises(ValueError, match="LLM_BASE_URL is not a valid URL"):
+        bger.model_config()
+
+
+def test_invalid_llm_url_is_a_strict_startup_problem_not_a_500(tmp_path, monkeypatch):
+    from conftest import make_settings
+
+    monkeypatch.setattr("bger.load_settings", lambda: make_settings(tmp_path, LLM_BASE_URL="https://localhost:bogus/v1"))
+    assert dashboard.startup_problems()[0][0].startswith("LLM: LLM_BASE_URL is not a valid URL")
+    case = seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", CONVO_SOURCE)
+    with patch.dict(dashboard.app.config, DATABASE=tmp_path / "review.sqlite", KB=tmp_path / "kb.sqlite",
+                    TODAY=date(2026, 11, 27)):
+        response = dashboard.app.test_client().post("/conversation/ask", json={"case": case, "lang": "de",
+                                                                               "question": "Was gilt?"})
+    assert response.status_code == 502  # a clean provider error instead of an uncaught InvalidURL
+
+
 @pytest.mark.parametrize("url", ["http://localhost:8000/v1/", "http://127.0.0.1/v1", "https://api.example.test/v1/"])
 def test_model_config_allows_https_and_local_http(url, tmp_path):
     from conftest import make_settings
