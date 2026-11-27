@@ -108,6 +108,35 @@ def cmd_parse(args: argparse.Namespace) -> int:
     return 1 if rep.status.get("stale") else 0
 
 
+def _window(args: argparse.Namespace):
+    from datetime import date
+
+    from suva.windows import challenge_window, dev_window
+
+    if args.window == "challenge":
+        return challenge_window(date.fromisoformat(args.today) if args.today else date.today())
+    return dev_window()
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    from suva.scoring.rules import load_rules
+    from suva.scoring.store import score_window
+
+    window, ruleset = _window(args), load_rules(args.rules)
+    with closing(open_repository(load_settings())) as repo:
+        rep = score_window(repo, window, ruleset)
+        top = [s for s in repo.list_scores()][:args.top]
+    print(json.dumps(rep.as_dict(), indent=2, ensure_ascii=False))
+    print(f"\ntop {len(top)} stored scores:")
+    for s in top:
+        print(f"  {s['score']:>5.1f}  {s['band']:<5} {s['key']:<28} "
+              + "; ".join(f"{f['points']:+g} {f['explanation']}" for f in s["fired"][:3]))
+    if rep.not_parsed or rep.stale_parses:
+        print(f"note: {rep.not_parsed} unparsed and {rep.stale_parses} stale judgements: "
+              "run `python -m suva parse`, then `score` again", file=sys.stderr)
+    return 0
+
+
 def _scoring_dir() -> Path:
     return load_settings().data_dir / "scoring"
 
@@ -354,6 +383,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("parse", help="split judgements into passages (E. numbers) and extract citations")
     p.add_argument("--force", action="store_true", help="re-parse everything, not only new/changed texts")
     p.set_defaults(func=cmd_parse)
+
+    p = sub.add_parser("score", help="score the window's judgements with rules.yaml and store it for the review app")
+    p.add_argument("--window", choices=["dev", "challenge"], default="challenge")
+    p.add_argument("--today", help="reference date for the challenge window (YYYY-MM-DD, default: today)")
+    p.add_argument("--rules", help="rules file (default: rules/rules.yaml)")
+    p.add_argument("--top", type=int, default=10, help="stored scores to print")
+    p.set_defaults(func=cmd_score)
 
     p = sub.add_parser("dataset", help="build the labelled dataset (Excel = relevant) with a time-based split")
     p.add_argument("--start", help="first decision date (default: 2025-10-01)")

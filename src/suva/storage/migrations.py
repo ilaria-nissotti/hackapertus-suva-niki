@@ -148,4 +148,23 @@ MIGRATIONS: list[tuple[str, str]] = [
         CREATE INDEX citations_law ON citations (law);
         """,
     ),
+    (
+        "006_relevance_scores",
+        """
+        -- Deterministic rules score per judgement (`suva score`). Re-run replaces it.
+        -- A score is current only while rules_hash, parser_version and text_hash still match.
+        CREATE TABLE relevance_scores (
+            key            TEXT PRIMARY KEY REFERENCES judgements (key),
+            score          REAL NOT NULL,     -- 0..100
+            points         REAL NOT NULL,
+            band           TEXT NOT NULL CHECK (band IN ('high', 'check', 'low')),
+            fired          TEXT NOT NULL,     -- JSON [{id, points, explanation}], strongest first
+            rules_hash     TEXT NOT NULL,     -- sha256 of the rules file
+            parser_version TEXT,              -- of the parse the features came from (NULL = unparsed)
+            text_hash      TEXT,              -- sha256 of the judgement text that was scored
+            scored_at      TEXT NOT NULL
+        );
+        CREATE INDEX relevance_scores_score ON relevance_scores (score);
+        """,
+    ),
 ]

@@ -103,5 +103,16 @@ class Repository(ABC):
     @abstractmethod
     def list_citations(self, key: str) -> list[dict[str, Any]]: ...
 
+    # --- relevance scores ---
+    @abstractmethod
+    def save_scores(self, rows: list[dict[str, Any]]) -> None:
+        """Replace the stored rules score of each row's key in one transaction."""
+
+    @abstractmethod
+    def get_score(self, key: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    def list_scores(self) -> list[dict[str, Any]]: ...
+
     @abstractmethod
     def close(self) -> None: ...

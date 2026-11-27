@@ -321,6 +321,30 @@ class SQLiteRepository(Repository):
             "SELECT c.* FROM citations c JOIN passages p ON p.pid = c.pid WHERE p.key = ?"
             " ORDER BY p.ord, c.start", (key,))]
 
+    # --- relevance scores ------------------------------------------------
+    _SCORE_COLS = ("key", "score", "points", "band", "fired", "rules_hash", "parser_version", "text_hash")
+
+    def save_scores(self, rows: list[dict[str, Any]]) -> None:
+        now = utcnow()
+        with self._write():
+            self.conn.executemany(
+                f"INSERT OR REPLACE INTO relevance_scores ({', '.join(self._SCORE_COLS)}, scored_at)"
+                f" VALUES ({', '.join('?' * (len(self._SCORE_COLS) + 1))})",
+                [(*(json.dumps(r["fired"], ensure_ascii=False) if c == "fired" else r[c] for c in self._SCORE_COLS),
+                  now) for r in rows],
+            )
+
+    @staticmethod
+    def _score_row(row) -> dict[str, Any]:
+        return {**dict(row), "fired": json.loads(row["fired"])}
+
+    def get_score(self, key: str) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM relevance_scores WHERE key = ?", (key,)).fetchone()
+        return self._score_row(row) if row else None
+
+    def list_scores(self) -> list[dict[str, Any]]:
+        return [self._score_row(r) for r in self.conn.execute("SELECT * FROM relevance_scores ORDER BY score DESC")]
+
     def close(self) -> None:
         self.conn.close()
 

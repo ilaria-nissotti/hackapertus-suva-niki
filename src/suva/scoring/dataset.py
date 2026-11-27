@@ -93,7 +93,8 @@ def docket_splits(rows: list[dict[str, Any]], test_from: date) -> dict[str, str]
             else "train" for row in rows}
 
 
-def build_record(repo: Repository, row: dict[str, Any], positives: set[str], split: str) -> dict[str, Any]:
+def features_record(repo: Repository, row: dict[str, Any]) -> dict[str, Any]:
+    """Everything the rules can look at for one judgement (no label, no split)."""
     j = repo.get_judgement(row["key"]) or {}
     parse = repo.get_parse(row["key"]) or {}
     passages = repo.list_passages(row["key"])
@@ -109,9 +110,8 @@ def build_record(repo: Repository, row: dict[str, Any], positives: set[str], spl
         "decision_date": decision,
         "chamber": row["chamber_prefix"],
         "language": row["language"],
-        "relevant": row["key"] in positives,
-        "split": split,
         "parse_status": parse.get("status"),
+        "parser_version": parse.get("parser_version"),
         "parse_stale": bool(parse) and (parse.get("parser_version") != PARSER_VERSION
                                         or parse.get("text_hash") != (sha256(j["text"]) if j.get("text") else None)),
         "parties": parse.get("parties") or "",
@@ -126,6 +126,10 @@ def build_record(repo: Repository, row: dict[str, Any], positives: set[str], spl
         "articles": sorted({c["canonical"] for c in citations if c["kind"] == "statute"}),
         "bge": sorted({c["canonical"] for c in citations if c["kind"] == "bge"}),
     }
+
+
+def build_record(repo: Repository, row: dict[str, Any], positives: set[str], split: str) -> dict[str, Any]:
+    return features_record(repo, row) | {"relevant": row["key"] in positives, "split": split}
 
 
 def build_dataset(
