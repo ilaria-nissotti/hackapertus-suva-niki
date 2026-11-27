@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from suva.config import Settings
+from suva.hashing import sha256
 from suva.sources.quality import usable_text
 from suva.storage.base import AuditEntry, Repository
 from suva.storage.migrations import MIGRATIONS
@@ -197,7 +198,9 @@ class SQLiteRepository(Repository):
         d = rec.decision_date.isoformat() if rec.decision_date else None
         pub = rec.publication_date.isoformat() if rec.publication_date else None
         prefix = rec.docket.split("_", 1)[0] if "_" in rec.docket else None
+        text = usable_text(rec.text)
         with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
             row = self.conn.execute(
                 "SELECT text, publication_date, language FROM judgements WHERE key = ?", (rec.key,)
             ).fetchone()
@@ -208,14 +211,15 @@ class SQLiteRepository(Repository):
                     " publication_date, publication_date_source, text, text_source,"
                     " first_seen_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (rec.key, rec.docket, d, prefix, rec.language, pub, rec.source if pub else None,
-                     rec.text, rec.source if rec.text else None, now, now),
+                     text, rec.source if text else None, now, now),
                 )
             else:
                 current = len(row["text"] or "") if usable_text(row["text"]) else 0
-                if rec.text and usable_text(rec.text) and len(rec.text) > current:
+                if text and len(text) > current:
                     self.conn.execute(
                         "UPDATE judgements SET text = ?, text_source = ?, updated_at = ? WHERE key = ?",
-                        (rec.text, rec.source, now, rec.key))
+                        (text, rec.source, now, rec.key))
+                    self._delete_parse(rec.key)
                 if pub and row["publication_date"] is None:
                     self.conn.execute(
                         "UPDATE judgements SET publication_date = ?, publication_date_source = ?,"
@@ -234,13 +238,15 @@ class SQLiteRepository(Repository):
         return new
 
     def clear_unusable_text(self, key: str) -> bool:
-        row = self.conn.execute("SELECT text FROM judgements WHERE key = ?", (key,)).fetchone()
-        if row is None or not row["text"] or usable_text(row["text"]):
-            return False
         with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            row = self.conn.execute("SELECT text FROM judgements WHERE key = ?", (key,)).fetchone()
+            if row is None or row["text"] is None or usable_text(row["text"]):
+                return False
             self.conn.execute("UPDATE judgements SET text = NULL, text_source = NULL, updated_at = ? WHERE key = ?",
                               (utcnow(), key))
-        return True
+            self._delete_parse(key)
+            return True
 
     def get_judgement(self, key: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM judgements WHERE key = ?", (key,)).fetchone()
@@ -272,12 +278,19 @@ class SQLiteRepository(Repository):
                               (path, utcnow(), key))
 
     # --- passages + citations (step 4) ------------------------------------
-    def save_parse(self, seg, citations, text_hash) -> None:
+    def _delete_parse(self, key: str) -> None:
+        self.conn.execute("DELETE FROM citations WHERE pid IN (SELECT pid FROM passages WHERE key = ?)", (key,))
+        self.conn.execute("DELETE FROM passages WHERE key = ?", (key,))
+        self.conn.execute("DELETE FROM parses WHERE key = ?", (key,))
+
+    def save_parse(self, seg, citations, text_hash) -> bool:
         n_cit = sum(len(v) for v in citations.values())
         with self.conn:
-            self.conn.execute(
-                "DELETE FROM citations WHERE pid IN (SELECT pid FROM passages WHERE key = ?)", (seg.key,))
-            self.conn.execute("DELETE FROM passages WHERE key = ?", (seg.key,))
+            self.conn.execute("BEGIN IMMEDIATE")
+            row = self.conn.execute("SELECT text FROM judgements WHERE key = ?", (seg.key,)).fetchone()
+            if row is None or (sha256(row["text"]) if row["text"] else None) != text_hash:
+                return False
+            self._delete_parse(seg.key)
             self.conn.executemany(
                 'INSERT INTO passages (pid, key, ord, kind, number, text, start, "end") VALUES (?,?,?,?,?,?,?,?)',
                 [(p.pid, seg.key, i, p.kind, p.number, p.text, p.start, p.end) for i, p in enumerate(seg.passages)],
@@ -294,6 +307,7 @@ class SQLiteRepository(Repository):
                 (seg.key, seg.status, json.dumps(seg.issues), seg.parser_version, text_hash, seg.chamber,
                  seg.parties, seg.subject, len(seg.passages), n_cit, utcnow()),
             )
+        return True
 
     def get_parse(self, key: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM parses WHERE key = ?", (key,)).fetchone()

@@ -91,8 +91,8 @@ class Repository(ABC):
 
     # --- passages + citations (step 4) ------------------------------------
     @abstractmethod
-    def save_parse(self, seg: Any, citations: dict[str, list[Any]], text_hash: str | None) -> None:
-        """Store a Segmentation and its citations per passage id, replacing any earlier parse."""
+    def save_parse(self, seg: Any, citations: dict[str, list[Any]], text_hash: str | None) -> bool:
+        """Replace the parse if the stored text still has the supplied hash."""
 
     @abstractmethod
     def get_parse(self, key: str) -> dict[str, Any] | None: ...

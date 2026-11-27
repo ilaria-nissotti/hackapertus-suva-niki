@@ -143,6 +143,8 @@ def test_error_page_text_replaced_by_entscheidsuche(tmp_path, repo):
     from suva.sources.base import SourceRecord
     repo.upsert_judgement(SourceRecord(source="opencaselaw", source_id="old", docket="8C_5/2026",
                                        decision_date=date(2026, 10, 1), text=error_page))
+    with repo.conn:
+        repo.conn.execute("UPDATE judgements SET text = ? WHERE key = ?", (error_page, "8C_5/2026@2026-10-01"))
     client = es_client([es_hit("8C_5/2026", "2026-10-01")], [])
 
     rep = fetch(repo, raw, Window("dev", date(2026, 10, 1), date(2026, 10, 7)), client=client, include_picks=False)

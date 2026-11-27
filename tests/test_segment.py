@@ -105,7 +105,7 @@ def test_full_decision_de():
     assert ids(s) == ["header", "facts", "reasons", "E.1", "E.2", "E.2.1", "E.2.2", "E.3", "dispositiv"]
     e22 = next(p for p in s.passages if p.number == "2.2")
     assert "20. Dezember 2023 war ein Sonntag." in e22.text  # date not taken as E.20
-    assert "Art. 82 BGG)" in next(p for p in s.passages if p.number == "1").text  # line breaks joined
+    assert "Art. 82 BGG\n)" in next(p for p in s.passages if p.number == "1").text
     assert s.chamber == "IV. öffentlich-rechtliche Abteilung"
     assert s.parties.startswith("Suva, Fluhmattstrasse")
     assert s.subject == "Unfallversicherung (Kausalzusammenhang),"
@@ -113,8 +113,13 @@ def test_full_decision_de():
 
 def test_no_text_lost():
     s = segment("k", DE)
-    joined = "\n\n".join(p.text for p in s.passages)
-    assert sum(len(p.text) for p in paragraphs(DE)) == sum(len(x) for x in joined.split("\n\n"))
+    previous_end = 0
+    for passage in s.passages:
+        assert passage.text == DE[passage.start:passage.end]
+        assert not DE[previous_end:passage.start].strip()
+        assert previous_end <= passage.start
+        previous_end = passage.end
+    assert not DE[previous_end:].strip()
 
 
 def test_short_order_is_ok_without_numbers():
@@ -181,3 +186,11 @@ def test_single_judge_heading_variants():
 def test_das_bundesgericht_erkennt():
     s = segment("k", DE.replace("Demnach erkennt das Bundesgericht:", "Das Bundesgericht erkennt:"))
     assert s.status == "ok" and ids(s)[-1] == "dispositiv"
+
+
+def test_dispositiv_does_not_overlap_header_without_reasons():
+    text = "Bundesgericht\n\nGegenstand\n\nDemnach erkennt das Bundesgericht:\n\nAbgewiesen."
+    result = segment("key", text)
+    header, outcome = result.passages
+    assert header.end <= outcome.start
+    assert outcome.text.startswith("Demnach erkennt")

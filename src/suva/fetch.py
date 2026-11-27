@@ -161,7 +161,11 @@ def fetch(
                 rep.errors.append(f"text fallback {key}: {type(exc).__name__}: {exc}")
                 rep.still_without_text.append(key)
                 continue
-            text = html_to_text(html)
+            text = usable_text(html_to_text(html))
+            if not text:
+                rep.still_without_text.append(key)
+                rep.errors.append(f"text fallback {key}: no usable judgement text")
+                continue
             store(replace(html_record, text=text), cohort=key in rep.sightings)
             repo.set_html_path(key, str(raw_dir / "entscheidsuche" / f"{html_record.source_id}.html"))
             rep.text_fallback.append(key)
@@ -191,10 +195,18 @@ def fetch(
             if html_for_picks and es["status"] == "complete" and html_record and html_record.html_url:
                 cache = raw_dir / "entscheidsuche"
                 try:
-                    entscheidsuche.fetch_html(client, html_record, cache)
+                    html = entscheidsuche.fetch_html(client, html_record, cache)
+                    text = usable_text(html_to_text(html))
+                    if not text:
+                        raise ValueError("no usable judgement text")
+                    if not has_text and text_fallback:
+                        store(replace(html_record, text=text), cohort=key in rep.sightings)
+                        rep.text_fallback.append(key)
+                        if key in rep.still_without_text:
+                            rep.still_without_text.remove(key)
+                        has_text = True
                     repo.set_html_path(key, str(cache / f"{html_record.source_id}.html"))
                     rep.html_fetched += 1
-                    has_text = True
                 except Blocked as exc:
                     es["status"] = "blocked"
                     rep.errors.append(f"html blocked, stopped: {exc}")

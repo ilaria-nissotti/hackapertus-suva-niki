@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from suva.hashing import sha256
 from suva.parse.citations import extract
 from suva.parse.segment import PARSER_VERSION, segment
+from suva.sources.base import parse_iso_date
 from suva.storage.base import AuditEntry, Repository
 
 WATCH_PREFIXES = ("8C", "9C")  # accident / social insurance chambers: failures here matter most
@@ -32,9 +33,14 @@ class ParseReport:
 
 def parse_all(repo: Repository, force: bool = False) -> ParseReport:
     rep = ParseReport()
-    picks = {r["docket"] for r in repo.list_known_positives(court="bger") if r["docket"]}
+    rows = repo.list_judgements()
+    docket_counts = Counter(row["docket"] for row in rows)
+    labels = repo.list_known_positives(court="bger")
+    exact_picks = {label["ref"] for label in labels if parse_iso_date(label["ref"].partition("@")[2])}
+    unique_pick_dockets = {label["docket"] for label in labels
+                           if label["ref"] not in exact_picks and docket_counts[label["docket"]] == 1}
     status, issues = Counter(), Counter()
-    for row in repo.list_judgements():
+    for row in rows:
         rep.judgements += 1
         j = repo.get_judgement(row["key"])
         text = j["text"]
@@ -47,7 +53,10 @@ def parse_all(repo: Repository, force: bool = False) -> ParseReport:
         else:
             seg = segment(j["key"], text)
             cits = {p.pid: extract(p.text, self_docket=j["docket"]) for p in seg.passages}
-            repo.save_parse(seg, cits, text_hash)
+            if not repo.save_parse(seg, cits, text_hash):
+                status["stale"] += 1
+                issues["text_changed_during_parse"] += 1
+                continue
             rep.parsed += 1
             rep.passages += len(seg.passages)
             rep.citations += sum(len(v) for v in cits.values())
@@ -56,7 +65,7 @@ def parse_all(repo: Repository, force: bool = False) -> ParseReport:
         issues.update(seg_issues)
         if seg_status != "ok":
             label = f"{j['key']} ({', '.join(seg_issues)})"
-            if j["docket"] in picks:
+            if j["key"] in exact_picks or j["docket"] in unique_pick_dockets:
                 rep.picks_not_ok.append(label)
             if (j["chamber_prefix"] or "") in WATCH_PREFIXES:
                 rep.watched_not_ok.append(label)

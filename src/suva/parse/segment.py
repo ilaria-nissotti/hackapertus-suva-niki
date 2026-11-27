@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from suva.sources.quality import is_error_page
 
-PARSER_VERSION = "segment-v1"
+PARSER_VERSION = "segment-v2"
 MIN_TEXT_CHARS = 1000
 
 FACTS_RE = re.compile(r"^(Sachverhalt|Faits|Fatti)\s*:?$", re.I)
@@ -113,10 +113,6 @@ def _find(paras: list[_Para], rx: re.Pattern, start: int = 0, max_len: int = 160
     return None
 
 
-def _join(paras: list[_Para]) -> tuple[str, int, int]:
-    return "\n\n".join(p.text for p in paras), paras[0].start, paras[-1].end
-
-
 def _header_fields(seg: Segmentation, header: list[_Para]) -> None:
     texts = [p.text for p in header]
     for t in texts[:12]:
@@ -147,19 +143,21 @@ def segment(key: str, text: str | None) -> Segmentation:
     i_facts = _find(paras, FACTS_RE)
     if i_facts is not None and i_reasons is not None and i_facts > i_reasons:
         i_facts = None
-    i_disp = _find(paras, DISPOSITIV_RE, (i_reasons or 0) + 1, max_len=200) if paras else None
+    i_disp = _find(paras, DISPOSITIV_RE, i_reasons + 1 if i_reasons is not None else 0, max_len=200)
 
     def add(kind: str, ps: list[_Para], number: str | None = None, suffix: str | None = None) -> None:
         if not ps:
             return
-        body, s, e = _join(ps)
-        seg.passages.append(Passage(f"{key}#{suffix or kind}", kind, number, body, s, e))
+        start, end = ps[0].start, ps[-1].end
+        seg.passages.append(Passage(f"{key}#{suffix or kind}", kind, number, text[start:end], start, end))
 
     if i_reasons is None:
         seg.issues.append("no_reasons_heading")
         # keep the header if we can recognise it, else everything is one passage
         sub = _find(paras, SUBJECT_RE)
         cut = sub + 2 if sub is not None and sub + 2 <= len(paras) else 0
+        if i_disp is not None:
+            cut = min(cut, i_disp)
         header = paras[:cut]
         add("header", header)
         _header_fields(seg, header)

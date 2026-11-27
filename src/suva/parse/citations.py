@@ -33,11 +33,13 @@ _LAW_ALT = "|".join(re.escape(a) for a in sorted(ALIAS, key=len, reverse=True))
 _QUAL = (r"(?:Abs\.|al\.|cpv\.|lit\.|let\.|lett\.|Ziff\.|ch\.|n\.|Satz|phrase|frase|ff\.|f\.|ss\.?|segg?\.|"
          r"und|et|e|bis|ter|quater|\d+[a-z]?(?=[\s,.)]|$)|[a-z](?=[\s,)])|,)")
 ART_RE = re.compile(
-    r"\b[Aa]rt(?:s|t)?\.\s*(?P<art>\d+[a-z]?(?:bis|ter|quater|quinquies|sexies)?)"
+    r"\b(?i:art(?:s|t)?)\.\s*(?P<art>\d+[a-z]?(?:bis|ter|quater|quinquies|sexies)?)"
     rf"(?P<qual>(?:\s*{_QUAL}){{0,14}}?)\s*"
     r"(?:des\s+|der\s+|de\s+la\s+|du\s+|de\s+l'|della\s+|del\s+|dell')?"
     rf"(?P<law>{_LAW_ALT})(?![A-Za-z])"
 )
+ARTICLE_LIST_RE = re.compile(r"(?:\s*(?:,|und\b|et\b|e\b)\s*\d+[a-z]?)+\s*")
+ARTICLE_NUMBER_RE = re.compile(r"\d+[a-z]?")
 PARA_RE = re.compile(r"(?:Abs\.|al\.|cpv\.)\s*(\d+[a-z]?)")
 BGE_RE = re.compile(
     r"\b(?P<coll>BGE|ATF|DTF)\s+(?P<vol>\d{1,3})\s+(?P<part>Ia|Ib|II|III|IV|V|VI|I)\s+(?P<page>\d{1,4})\b"
@@ -63,8 +65,12 @@ def extract(text: str, self_docket: str | None = None) -> list[Citation]:
     for m in ART_RE.finditer(text):
         law = ALIAS[m["law"]]
         para = PARA_RE.search(m["qual"] or "")
-        canon = f"Art. {m['art']}" + (f" Abs. {para.group(1)}" if para else "") + f" {law}"
-        out.append(Citation("statute", canon, m.group(0), m.start(), m.end(), law=law, article=m["art"]))
+        articles = [m["art"]]
+        if ARTICLE_LIST_RE.fullmatch(m["qual"]):
+            articles.extend(ARTICLE_NUMBER_RE.findall(m["qual"]))
+        for article in articles:
+            canon = f"Art. {article}" + (f" Abs. {para.group(1)}" if para else "") + f" {law}"
+            out.append(Citation("statute", canon, m.group(0), m.start(), m.end(), law=law, article=article))
     for m in BGE_RE.finditer(text):
         canon = f"BGE {m['vol']} {m['part']} {m['page']}"
         out.append(Citation("bge", canon, m.group(0), m.start(), m.end(), consideration=m["cons"]))

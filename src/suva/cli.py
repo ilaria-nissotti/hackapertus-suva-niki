@@ -126,7 +126,7 @@ def cmd_parse(args: argparse.Namespace) -> int:
     finally:
         repo.close()
     print(json.dumps(rep.as_dict(), indent=2, ensure_ascii=False))
-    return 0
+    return 1 if rep.status.get("stale") else 0
 
 
 def cmd_llm_ping(args: argparse.Namespace) -> int:

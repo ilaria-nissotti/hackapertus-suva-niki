@@ -20,3 +20,8 @@ def test_empty():
 def test_html_to_text_one_paragraph_per_div():
     html = "<html><body><div class='para'>8C_1/2025</div><div class='para'>Erwägungen:</div><div class='para'> 1. </div></body></html>"
     assert html_to_text(html) == "8C_1/2025\n\nErwägungen:\n\n1."
+
+
+def test_error_marker_is_not_hidden_by_prose_mention():
+    assert is_error_page("Document introuvable. Consultez les considérants sur le portail.")
+    assert not is_error_page("Document trouvé")

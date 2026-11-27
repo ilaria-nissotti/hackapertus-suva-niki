@@ -30,8 +30,25 @@ def test_parse_all_reports_and_skips_unchanged(repo):
 
 
 def test_text_change_triggers_reparse(repo):
-    add(repo, "8C_1/2025", ERROR)  # stored error page (old run)
+    add(repo, "8C_1/2025", ERROR)
+    assert repo.get_judgement("8C_1/2025@2025-10-02")["text"] is None
+    with repo.conn:
+        repo.conn.execute("UPDATE judgements SET text = ? WHERE key = ?", (ERROR, "8C_1/2025@2025-10-02"))
     assert parse_all(repo).issues == {"source_error_page": 1}
     add(repo, "8C_1/2025", GOOD)  # real text arrives later (fallback)
     rep = parse_all(repo)
     assert rep.parsed == 1 and rep.status == {"ok": 1}
+
+
+def test_parse_pick_report_uses_exact_decision(repo):
+    docket = "8C_1/2025"
+    add(repo, docket, GOOD)
+    repo.upsert_judgement(SourceRecord(
+        source="opencaselaw", source_id="other", docket=docket, decision_date=date(2025, 10, 3),
+    ))
+    repo.upsert_known_positive(dict(
+        ref=f"{docket}@2025-10-02", docket=docket, court="bger", in_xlsx=1, in_exports=0,
+    ))
+    report = parse_all(repo)
+    assert report.watched_not_ok == [f"{docket}@2025-10-03 (no_text)"]
+    assert not report.picks_not_ok

@@ -14,14 +14,15 @@ import re
 from bs4 import BeautifulSoup
 
 ERROR_MARKERS = re.compile(
-    r"Dokument nicht gefunden|in elektronischer Form nicht verfügbar|Document (non )?trouvé|"
+    r"Dokument nicht gefunden|in elektronischer Form nicht verfügbar|Document (?:non trouvé|introuvable)|"
     r"n'est pas disponible sous forme électronique|non disponibile in forma elettronica|"
     r"Request unsuccessful\. Incapsula",
     re.I,
 )
 PORTAL_CHROME = re.compile(r"Liste der Neuheiten|Expertensuche für Abonnenten|Eurospider Information Technology", re.I)
 JUDGEMENT_MARKERS = re.compile(
-    r"Erwägung|Considérant|considérant|Considerando|Diritto:|Demnach erkennt|Par ces motifs|Per questi motivi"
+    r"^\s*(?:Erwägungen?\s*:|Considérant en droit|Considerando in diritto|Diritto\s*:|"
+    r"Demnach erkennt|Par ces motifs|Per questi motivi)", re.I | re.M
 )
 
 

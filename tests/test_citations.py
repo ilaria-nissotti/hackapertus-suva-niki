@@ -41,3 +41,10 @@ def test_offsets_point_at_raw():
     t = "x Art. 6 Abs. 2 UVG y"
     c = extract(t)[0]
     assert t[c.start:c.end] == c.raw and c.law == "UVG" and c.article == "6"
+
+
+def test_grouped_articles_keep_shared_source_span():
+    text = "Voir ART. 4, 6 et 9 LAA."
+    citations = extract(text)
+    assert [citation.canonical for citation in citations] == ["Art. 4 UVG", "Art. 6 UVG", "Art. 9 UVG"]
+    assert all(text[c.start:c.end] == "ART. 4, 6 et 9 LAA" for c in citations)
