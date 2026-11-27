@@ -165,6 +165,8 @@ def _rule_from_dict(raw: dict[str, Any], index: int) -> Rule:
     match = raw["match"]
     if not isinstance(match, dict) or not match or set(match) - set(MATCH_KINDS):
         raise RulesError(f"{where}: match needs at least one of {', '.join(MATCH_KINDS)}")
+    if "any" in match and "regex" in match:
+        raise RulesError(f"{where}: use either match.any or match.regex, not both (only 'any' would be counted)")
     for kind in ("any", "all"):
         terms = match.get(kind, [])
         if not isinstance(terms, list) or not all(isinstance(t, (str, int)) and str(t).strip() for t in terms):

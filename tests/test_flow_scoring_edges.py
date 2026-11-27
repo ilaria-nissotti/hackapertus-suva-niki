@@ -89,21 +89,17 @@ def test_empty_text_counts_zero():
     assert one_rule_set().rules[0].count({"text": ""}) == 0
 
 
-def test_any_plus_regex_counts_only_any_hits_in_text_fields():
-    r = parse_rules({"rules": [{"id": "r", "field": "text", "match": {"any": ["Suva"], "regex": "UVG"},
-                                "per_match": 1, "explanation": "x"}]}).rules[0]
-    # BUG: with both `any` and `regex`, only the `any` count is returned and the regex only acts
-    # as a gate. Validation accepts the combination silently. Expected: either reject the combo in
-    # parse_rules or count both (here 1 Suva + 3 UVG).
-    assert r.count({"text": "Suva UVG UVG UVG"}) == 1
-    assert r.count({"text": "Suva Suva"}) == 0  # regex gate: no UVG -> does not fire
+@pytest.mark.parametrize("field", ["text", "articles"])
+def test_any_plus_regex_is_rejected(field):
+    with pytest.raises(RulesError, match="either match.any or match.regex"):
+        parse_rules({"rules": [{"id": "r", "field": field, "match": {"any": ["Suva"], "regex": "UVG"},
+                                "per_match": 1, "explanation": "x"}]})
 
 
-def test_any_plus_regex_counts_only_any_hits_in_list_fields():
-    r = parse_rules({"rules": [{"id": "r", "field": "articles", "match": {"any": ["Art. 6 UVG"], "regex": "UVG$"},
+def test_all_plus_regex_is_still_allowed():
+    r = parse_rules({"rules": [{"id": "r", "field": "text", "match": {"all": ["Suva"], "regex": "UVG"},
                                 "per_match": 1, "explanation": "x"}]}).rules[0]
-    # BUG: same as above for list fields: three UVG articles, but the count is 1.
-    assert r.count({"articles": ["Art. 6 UVG", "Art. 7 UVG", "Art. 8 UVG"]}) == 1
+    assert r.count({"text": "Suva UVG UVG"}) == 2 and r.count({"text": "UVG"}) == 0
 
 
 def test_all_terms_must_all_appear():
