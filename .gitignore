@@ -31,3 +31,5 @@ data/*.sqlite
 data/*.sqlite-*
 .pytest_cache/
 *.egg-info/
+# Downloaded source data (OpenCaseLaw parquet, entscheidsuche HTML)
+data/raw/
