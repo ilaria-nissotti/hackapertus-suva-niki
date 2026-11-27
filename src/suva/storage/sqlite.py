@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from suva.config import Settings
+from suva.sources.quality import usable_text
 from suva.storage.base import AuditEntry, Repository
 from suva.storage.migrations import MIGRATIONS
 
@@ -198,7 +199,7 @@ class SQLiteRepository(Repository):
         prefix = rec.docket.split("_", 1)[0] if "_" in rec.docket else None
         with self.conn:
             row = self.conn.execute(
-                "SELECT length(text) AS n, publication_date, language FROM judgements WHERE key = ?", (rec.key,)
+                "SELECT text, publication_date, language FROM judgements WHERE key = ?", (rec.key,)
             ).fetchone()
             new = row is None
             if new:
@@ -210,7 +211,8 @@ class SQLiteRepository(Repository):
                      rec.text, rec.source if rec.text else None, now, now),
                 )
             else:
-                if rec.text and len(rec.text) > (row["n"] or 0):
+                current = len(row["text"] or "") if usable_text(row["text"]) else 0
+                if rec.text and usable_text(rec.text) and len(rec.text) > current:
                     self.conn.execute(
                         "UPDATE judgements SET text = ?, text_source = ?, updated_at = ? WHERE key = ?",
                         (rec.text, rec.source, now, rec.key))
@@ -230,6 +232,15 @@ class SQLiteRepository(Repository):
                 (rec.key, rec.source, rec.source_id, rec.chamber_raw, rec.url, rec.html_url, rec.seen_at, now),
             )
         return new
+
+    def clear_unusable_text(self, key: str) -> bool:
+        row = self.conn.execute("SELECT text FROM judgements WHERE key = ?", (key,)).fetchone()
+        if row is None or not row["text"] or usable_text(row["text"]):
+            return False
+        with self.conn:
+            self.conn.execute("UPDATE judgements SET text = NULL, text_source = NULL, updated_at = ? WHERE key = ?",
+                              (utcnow(), key))
+        return True
 
     def get_judgement(self, key: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM judgements WHERE key = ?", (key,)).fetchone()

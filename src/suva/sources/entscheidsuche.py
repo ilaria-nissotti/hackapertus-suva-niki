@@ -112,6 +112,6 @@ def _validate_html(html: str, rec: SourceRecord) -> None:
     docket = re.sub(r"[^a-z0-9]", "", rec.docket.lower())
     header = re.sub(r"[^a-z0-9]", "", soup.get_text(" ", strip=True).lower())
     if not content.strip() or not docket or docket not in header or not re.search(
-        r"Erwägungen|Considérant|Considérants|Diritto|Considerando", content, re.IGNORECASE
+        r"Erwägung|Considérant|Considérants|Diritto|Considerando", content, re.IGNORECASE
     ):
         raise ValueError(f"{rec.docket}: response lacks expected judgement content")

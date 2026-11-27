@@ -71,6 +71,10 @@ class Repository(ABC):
         """
 
     @abstractmethod
+    def clear_unusable_text(self, key: str) -> bool:
+        """Drop stored text that is an error page, not a judgement. True if cleared."""
+
+    @abstractmethod
     def get_judgement(self, key: str) -> dict[str, Any] | None: ...
 
     @abstractmethod

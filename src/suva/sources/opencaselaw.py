@@ -23,6 +23,7 @@ import pyarrow.parquet as pq
 
 from suva.http import USER_AGENT
 from suva.sources.base import SourceRecord, parse_iso_date
+from suva.sources.quality import usable_text
 
 SOURCE = "opencaselaw"
 BGER_URL = "https://huggingface.co/datasets/voilaj/swiss-caselaw/resolve/main/data/bger.parquet"
@@ -57,7 +58,7 @@ def _to_record(row: dict) -> SourceRecord:
         chamber_raw=row.get("chamber"),
         publication_date=parse_iso_date(row.get("publication_date")),
         url=row.get("source_url"),
-        text=row.get("full_text") if row.get("has_full_text") else None,
+        text=usable_text(row.get("full_text")) if row.get("has_full_text") else None,
         seen_at=row.get("scraped_at"),
     )
 

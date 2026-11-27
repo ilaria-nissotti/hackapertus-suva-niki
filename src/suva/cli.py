@@ -80,7 +80,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         rep = fetch(
             repo, settings.data_dir / "raw", window,
             use_entscheidsuche=not args.no_entscheidsuche, include_picks=not args.no_picks,
-            html_for_picks=not args.no_html, refresh_opencaselaw=args.refresh_opencaselaw,
+            html_for_picks=not args.no_html, text_fallback=not args.no_text_fallback, refresh_opencaselaw=args.refresh_opencaselaw,
         )
     finally:
         repo.close()
@@ -162,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-entscheidsuche", action="store_true", help="OpenCaseLaw only (offline after download)")
     p.add_argument("--no-picks", action="store_true", help="skip Suva's picked judgements")
     p.add_argument("--no-html", action="store_true", help="skip HTML download for the picks")
+    p.add_argument("--no-text-fallback", action="store_true",
+                   help="don't fetch entscheidsuche HTML for decisions OpenCaseLaw has no usable text for")
     p.add_argument("--refresh-opencaselaw", action="store_true", help="re-download the parquet (~925 MB)")
     p.set_defaults(func=cmd_fetch)
 
