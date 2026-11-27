@@ -9,5 +9,7 @@ lxml>=5.0
 # Reading the provided summaries spreadsheet
 pandas>=2.2
 openpyxl>=3.1
+# OpenCaseLaw parquet
+pyarrow>=15
 # UI
 streamlit>=1.38
