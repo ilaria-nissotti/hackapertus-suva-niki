@@ -54,6 +54,22 @@ Where it breaks, what you did not test, and known failure modes.
 What a judge needs to get your numbers back: hardware, runtime, seeds, and the
 exact commit.
 
+### Running it
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt && pip install -e .
+cp .env.example .env          # set LLM_NAME, LLM_BASE_URL, LLM_API_KEY
+python -m suva init-db        # create/upgrade the knowledge base (data/kb.sqlite)
+python -m suva llm-ping       # one live call: checks the Apertus endpoint, prints latency/tokens
+pytest                        # offline test suite (no network, fake LLM)
+```
+
+Configuration is environment-only (`.env.example`). `LLM_CACHE_MODE=readonly`
+replays cached Apertus calls without network access (frozen snapshot mode); every
+LLM call is recorded in the append-only `audit_log` table (model, host, prompt
+version, input/output hashes — no prompt text, no keys).
+
 
 ## License
 
