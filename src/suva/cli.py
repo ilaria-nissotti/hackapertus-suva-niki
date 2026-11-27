@@ -88,6 +88,24 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 1 if rep.picks_missing or rep.errors else 0
 
 
+def cmd_coverage(args: argparse.Namespace) -> int:
+    """Per-week decision counts per source; flags weeks where one source has gaps."""
+    from suva.coverage import coverage_by_week
+
+    repo = open_repository(load_settings())
+    try:
+        weeks = coverage_by_week(repo, args.start, args.end)
+    finally:
+        repo.close()
+    cols = ["total", "opencaselaw", "entscheidsuche", "only_opencaselaw", "only_entscheidsuche", "no_text"]
+    print("week        " + "".join(f"{c:>20}" for c in cols))
+    for w in weeks:
+        print(f"{w['week']}  " + "".join(f"{w.get(c, 0):>20}" for c in cols))
+    tot = {c: sum(w.get(c, 0) for w in weeks) for c in cols}
+    print("TOTAL       " + "".join(f"{tot[c]:>20}" for c in cols))
+    return 0
+
+
 def cmd_llm_ping(args: argparse.Namespace) -> int:
     """Check the gateway: one tiny uncached call, print model, latency, tokens."""
     from suva.llm import LLMClient
@@ -136,6 +154,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-html", action="store_true", help="skip HTML download for the picks")
     p.add_argument("--refresh-opencaselaw", action="store_true", help="re-download the parquet (~925 MB)")
     p.set_defaults(func=cmd_fetch)
+
+    p = sub.add_parser("coverage", help="per-week coverage per source for a decision-date range")
+    p.add_argument("--start", required=True, help="YYYY-MM-DD")
+    p.add_argument("--end", required=True, help="YYYY-MM-DD")
+    p.set_defaults(func=cmd_coverage)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")
     p.add_argument("--prompt", default="Antworte mit genau einem Wort: Bereit?")
