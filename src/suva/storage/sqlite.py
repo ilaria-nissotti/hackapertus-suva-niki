@@ -190,6 +190,76 @@ class SQLiteRepository(Repository):
                 "SELECT * FROM known_positives WHERE court = ? ORDER BY ref", (court,)))
         return self._rows(self.conn.execute("SELECT * FROM known_positives ORDER BY ref"))
 
+    # --- judgements + coverage ledger (step 3) -----------------------------
+    def upsert_judgement(self, rec) -> bool:
+        now = utcnow()
+        d = rec.decision_date.isoformat() if rec.decision_date else None
+        pub = rec.publication_date.isoformat() if rec.publication_date else None
+        prefix = rec.docket.split("_", 1)[0] if "_" in rec.docket else None
+        with self.conn:
+            row = self.conn.execute(
+                "SELECT length(text) AS n, publication_date, language FROM judgements WHERE key = ?", (rec.key,)
+            ).fetchone()
+            new = row is None
+            if new:
+                self.conn.execute(
+                    "INSERT INTO judgements (key, docket, decision_date, chamber_prefix, language,"
+                    " publication_date, publication_date_source, text, text_source,"
+                    " first_seen_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (rec.key, rec.docket, d, prefix, rec.language, pub, rec.source if pub else None,
+                     rec.text, rec.source if rec.text else None, now, now),
+                )
+            else:
+                if rec.text and len(rec.text) > (row["n"] or 0):
+                    self.conn.execute(
+                        "UPDATE judgements SET text = ?, text_source = ?, updated_at = ? WHERE key = ?",
+                        (rec.text, rec.source, now, rec.key))
+                if pub and row["publication_date"] is None:
+                    self.conn.execute(
+                        "UPDATE judgements SET publication_date = ?, publication_date_source = ?,"
+                        " updated_at = ? WHERE key = ?", (pub, rec.source, now, rec.key))
+                if rec.language and row["language"] is None:
+                    self.conn.execute("UPDATE judgements SET language = ? WHERE key = ?", (rec.language, rec.key))
+            self.conn.execute(
+                "INSERT INTO judgement_sources (key, source, source_id, chamber_raw, url, html_url,"
+                " source_seen_at, retrieved_at) VALUES (?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(key, source) DO UPDATE SET source_id = excluded.source_id,"
+                " chamber_raw = excluded.chamber_raw, url = COALESCE(excluded.url, url),"
+                " html_url = COALESCE(excluded.html_url, html_url),"
+                " source_seen_at = excluded.source_seen_at, retrieved_at = excluded.retrieved_at",
+                (rec.key, rec.source, rec.source_id, rec.chamber_raw, rec.url, rec.html_url, rec.seen_at, now),
+            )
+        return new
+
+    def get_judgement(self, key: str) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM judgements WHERE key = ?", (key,)).fetchone()
+        return dict(row) if row else None
+
+    def list_judgements(self, start=None, end=None, dockets=None) -> list[dict[str, Any]]:
+        cols = ("key, docket, decision_date, chamber_prefix, language, publication_date,"
+                " publication_date_source, text_source, length(text) AS text_length, html_path,"
+                " first_seen_at")
+        sql, args = f"SELECT {cols} FROM judgements WHERE 1=1", []
+        if start:
+            sql += " AND decision_date >= ?"
+            args.append(start)
+        if end:
+            sql += " AND decision_date <= ?"
+            args.append(end)
+        rows = [dict(r) for r in self.conn.execute(sql + " ORDER BY decision_date, docket", args)]
+        if dockets is not None:
+            rows = [r for r in rows if r["docket"] in dockets]
+        return rows
+
+    def judgement_sources(self, key: str) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM judgement_sources WHERE key = ? ORDER BY source", (key,))]
+
+    def set_html_path(self, key: str, path: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE judgements SET html_path = ?, updated_at = ? WHERE key = ?",
+                              (path, utcnow(), key))
+
     def close(self) -> None:
         self.conn.close()
 

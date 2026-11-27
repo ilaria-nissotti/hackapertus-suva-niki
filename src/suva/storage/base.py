@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from suva.sources.base import SourceRecord
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,30 @@ class Repository(ABC):
 
     @abstractmethod
     def get_example_manifest(self) -> dict | None: ...
+
+    # --- judgements + coverage ledger (step 3) -----------------------------
+    @abstractmethod
+    def upsert_judgement(self, rec: "SourceRecord") -> bool:
+        """Merge one source sighting. Returns True if the judgement is new.
+
+        Never loses data: text is replaced only by a longer text, publication
+        date only fills an unknown one, and the sighting is logged per source.
+        """
+
+    @abstractmethod
+    def get_judgement(self, key: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    def list_judgements(
+        self, start: str | None = None, end: str | None = None, dockets: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Judgements by decision-date range and/or docket, without the text column."""
+
+    @abstractmethod
+    def judgement_sources(self, key: str) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def set_html_path(self, key: str, path: str) -> None: ...
 
     @abstractmethod
     def close(self) -> None: ...

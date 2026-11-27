@@ -70,4 +70,38 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "003_judgements_and_sources",
+        """
+        -- One row per decision (docket + decision date). Text is plain full text.
+        CREATE TABLE judgements (
+            key                     TEXT PRIMARY KEY,   -- '8C_129/2025#2025-11-11'
+            docket                  TEXT NOT NULL,
+            decision_date           TEXT,
+            chamber_prefix          TEXT,               -- '8C' (a feature, never a gate)
+            language                TEXT,
+            publication_date        TEXT,               -- NULL = unknown
+            publication_date_source TEXT,
+            text                    TEXT,
+            text_source             TEXT,
+            html_path               TEXT,               -- cached structured HTML, if fetched
+            first_seen_at           TEXT NOT NULL,
+            updated_at              TEXT NOT NULL
+        );
+        CREATE INDEX judgements_date ON judgements (decision_date);
+        CREATE INDEX judgements_docket ON judgements (docket);
+        -- Coverage ledger: every source that listed a decision.
+        CREATE TABLE judgement_sources (
+            key          TEXT NOT NULL REFERENCES judgements (key),
+            source       TEXT NOT NULL,
+            source_id    TEXT NOT NULL,
+            chamber_raw  TEXT,
+            url          TEXT,
+            html_url     TEXT,
+            source_seen_at TEXT,                        -- the source's own scrape time
+            retrieved_at TEXT NOT NULL,                 -- when we saw it there
+            PRIMARY KEY (key, source)
+        );
+        """,
+    ),
 ]
