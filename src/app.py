@@ -514,6 +514,45 @@ def summarize_top(limit, workers):
     return int(bool(failed))
 
 
+def startup_problems():
+    """What the review app needs before serving: (required, optional) problems, never secret values."""
+    required, optional = [], []
+    try:
+        model_config()
+    except ValueError as exc:
+        required.append(f"LLM: {exc} (see .env.example; check with `python -m suva llm-ping`)")
+    if not (FRONTEND / "index.html").is_file():
+        required.append("frontend not built: run `npm --prefix src/frontend ci && npm --prefix src/frontend run build`")
+    if not Path(app.config["KB"]).is_file():
+        required.append(f"knowledge base {app.config['KB']} not found: run `python -m suva init-db`, `fetch`, "
+                        "`parse` and `score`")
+    for lang in briefing.LANGUAGES:
+        api_key, voice = briefing.voice_config(lang)
+        if not api_key or not voice:
+            optional.append(f"ElevenLabs {lang}: set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID_{lang.upper()} "
+                            "to enable audio and voice questions")
+    return required, optional
+
+
+def check_startup(strict):
+    """Log the configuration once at startup; with --strict, refuse to serve without the required parts."""
+    required, optional = startup_problems()
+    config = current_config()
+    app.logger.info("startup_config kb=%s review_db=%s model=%s llm_host=%s today=%s", app.config["KB"],
+                    app.config["DATABASE"], config["LLM_NAME"], urlsplit(config.get("LLM_BASE_URL", "")).hostname,
+                    app.config["TODAY"] or "today")
+    for problem in required:
+        app.logger.error("startup_check_failed required=yes problem=%r", problem)
+    for problem in optional:
+        app.logger.warning("startup_check_failed required=no problem=%r", problem)
+    if required and strict:
+        app.logger.error("startup_refused problems=%d (drop --strict to serve anyway)", len(required))
+        return False
+    if not required:
+        app.logger.info("startup_check_ok optional_missing=%d", len(optional))
+    return True
+
+
 def main():
     configure_logging()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -522,6 +561,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     server = commands.add_parser("serve")
     server.add_argument("--port", type=int, default=5050)
+    server.add_argument("--strict", action="store_true",
+                        help="exit if the LLM config, frontend build or knowledge base is missing")
     top = commands.add_parser("summarize-top", help="draft DE/FR summaries for the best-scored judgements")
     top.add_argument("--limit", type=int, default=10)
     top.add_argument("--workers", default=4, type=int, choices=range(1, 9))
@@ -531,6 +572,8 @@ def main():
     args = parser.parse_args()
     app.config["TODAY"] = args.today
     if args.command == "serve":
+        if not check_startup(args.strict):
+            return 2
         app.run(host="127.0.0.1", port=args.port)
     elif args.command == "summarize-top":
         return summarize_top(args.limit, args.workers)
