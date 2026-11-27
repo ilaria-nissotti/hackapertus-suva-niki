@@ -98,6 +98,7 @@ function App() {
     try {
       const response = await fetch(endpoint, {method: 'POST', headers: {Accept: 'application/json'}, body});
       const data = await response.json().catch(() => ({}));
+      if (response.status === 409) setRefresh(value => value + 1);
       if (!response.ok) throw new Error(data.message || (response.status === 413 ?
         'The upload exceeds the size limit.' : 'Could not complete the request. Try again.'));
       if (endpoint === '/add' && data.case) {
@@ -145,7 +146,7 @@ function App() {
           <h2 id="add-title">Add judgment</h2>
           <p>Add a judgment from the knowledge base, or upload its original text.</p>
           <label>Case ID<input name="docket" placeholder="8C_123/2026" required/></label>
-          <label>Decision date (needed if the case has several decisions)<input name="decision_date" type="date"/></label>
+          <label>Decision date (required for uploads or multiple decisions)<input name="decision_date" type="date"/></label>
           <label>Original text file (optional)<input name="text" type="file" accept=".txt,text/plain"/></label>
           <label>Original URL (optional)<input name="source_url" type="url"/></label>
           <label>Publication date (optional)<input name="publication_date" type="date"/></label>
@@ -196,7 +197,7 @@ function App() {
               <td><a href={link({case: row.key, view: null})} onClick={follow}
                 aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
                 {(row.issue || row.title !== row.docket) && <div className="topic">{row.issue || row.title}</div>}</td>
-              <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td><td className="score">{row.score ?? '—'}</td>
+              <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td><td className="score">{row.score === null ? '—' : Math.round(row.score)}</td>
               <td><Status value={row.status}/></td>
             </tr>)}</tbody>
           </table></div>

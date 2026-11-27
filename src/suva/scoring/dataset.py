@@ -112,6 +112,7 @@ def features_record(repo: Repository, row: dict[str, Any]) -> dict[str, Any]:
         "language": row["language"],
         "parse_status": parse.get("status"),
         "parser_version": parse.get("parser_version"),
+        "parsed_at": parse.get("parsed_at"),
         "parse_stale": bool(parse) and (parse.get("parser_version") != PARSER_VERSION
                                         or parse.get("text_hash") != (sha256(j["text"]) if j.get("text") else None)),
         "parties": parse.get("parties") or "",

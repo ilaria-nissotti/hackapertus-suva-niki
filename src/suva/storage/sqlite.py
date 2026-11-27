@@ -40,6 +40,18 @@ class SQLiteRepository(Repository):
                 self.conn.execute("BEGIN IMMEDIATE")
                 yield
 
+    def transaction(self):
+        return self._write()
+
+    def schema_is_current(self) -> bool:
+        table = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+        ).fetchone()
+        if not table:
+            return False
+        done = {r["name"] for r in self.conn.execute("SELECT name FROM schema_migrations")}
+        return all(name in done for name, _ in MIGRATIONS)
+
     def migrate(self) -> list[str]:
         applied = []
         with self._write():
@@ -305,7 +317,7 @@ class SQLiteRepository(Repository):
                 "INSERT OR REPLACE INTO parses (key, status, issues, parser_version, text_hash, chamber,"
                 " parties, subject, passages, citations, parsed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (seg.key, seg.status, json.dumps(seg.issues), seg.parser_version, text_hash, seg.chamber,
-                 seg.parties, seg.subject, len(seg.passages), n_cit, utcnow()),
+                 seg.parties, seg.subject, len(seg.passages), n_cit, datetime.now(timezone.utc).isoformat()),
             )
         return True
 
@@ -322,7 +334,7 @@ class SQLiteRepository(Repository):
             " ORDER BY p.ord, c.start", (key,))]
 
     # --- relevance scores ------------------------------------------------
-    _SCORE_COLS = ("key", "score", "points", "band", "fired", "rules_hash", "parser_version", "text_hash")
+    _SCORE_COLS = ("key", "score", "points", "band", "fired", "rules_hash", "parser_version", "text_hash", "inputs_hash")
 
     def save_scores(self, rows: list[dict[str, Any]]) -> None:
         now = utcnow()
@@ -330,7 +342,7 @@ class SQLiteRepository(Repository):
             self.conn.executemany(
                 f"INSERT OR REPLACE INTO relevance_scores ({', '.join(self._SCORE_COLS)}, scored_at)"
                 f" VALUES ({', '.join('?' * (len(self._SCORE_COLS) + 1))})",
-                [(*(json.dumps(r["fired"], ensure_ascii=False) if c == "fired" else r[c] for c in self._SCORE_COLS),
+                [(*(json.dumps(r["fired"], ensure_ascii=False) if c == "fired" else r.get(c) for c in self._SCORE_COLS),
                   now) for r in rows],
             )
 
@@ -345,9 +357,11 @@ class SQLiteRepository(Repository):
     def list_scores(self) -> list[dict[str, Any]]:
         return [self._score_row(r) for r in self.conn.execute("SELECT * FROM relevance_scores ORDER BY score DESC")]
 
-    def list_review_rows(self, start=None, end=None, keys=None) -> list[dict[str, Any]]:
+    def list_review_rows(self, start=None, end=None, keys=None, *, include_text=False) -> list[dict[str, Any]]:
         sql = ("SELECT j.key, j.docket, j.decision_date, j.publication_date, j.publication_date_source,"
-               " j.language, j.text, p.subject, s.score, s.band, s.fired, s.rules_hash,"
+               f" j.language, {'j.text' if include_text else 'NULL'} AS text,"
+               " p.subject, p.parsed_at, p.text_hash AS parse_text_hash, p.parser_version,"
+               " s.score, s.band, s.fired, s.rules_hash, s.inputs_hash,"
                " s.parser_version AS score_parser_version, s.text_hash AS score_text_hash"
                " FROM judgements j LEFT JOIN parses p ON p.key = j.key"
                " LEFT JOIN relevance_scores s ON s.key = j.key WHERE 1=1")

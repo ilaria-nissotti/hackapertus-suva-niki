@@ -31,14 +31,15 @@ class ParseReport:
         return asdict(self)
 
 
-def parse_all(repo: Repository, force: bool = False) -> ParseReport:
+def parse_all(repo: Repository, force: bool = False, *, key: str | None = None) -> ParseReport:
     rep = ParseReport()
-    rows = repo.list_judgements()
+    rows = repo.list_judgements() if key is None else [repo.get_judgement(key)]
+    rows = [row for row in rows if row is not None]
     docket_counts = Counter(row["docket"] for row in rows)
     labels = repo.list_known_positives(court="bger")
     exact_picks = {label["ref"] for label in labels if parse_iso_date(label["ref"].partition("@")[2])}
     unique_pick_dockets = {label["docket"] for label in labels
-                           if label["ref"] not in exact_picks and docket_counts[label["docket"]] == 1}
+                           if key is None and label["ref"] not in exact_picks and docket_counts[label["docket"]] == 1}
     status, issues = Counter(), Counter()
     for row in rows:
         rep.judgements += 1

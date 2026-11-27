@@ -4,12 +4,15 @@ Judgements come from the suva knowledge base (`python -m suva fetch`); `python -
 llm-ping` checks the Apertus endpoint.
 """
 
-import json
+from dataclasses import replace
 import os
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from openai import APIError
+
+from suva.config import load_settings
+from suva.llm import LLMClient
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE_ID = re.compile(r"\b\d+[A-Z]+_\d+/\d{4}\b")
@@ -27,34 +30,25 @@ def local_config(*names):
 
 
 def model_config():
-    names = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_NAME")
-    config = local_config(*names)
-    missing = [name for name in names if not config[name]]
-    if missing:
-        raise ValueError("Missing configuration: " + ", ".join(missing))
-    base_url = config["LLM_BASE_URL"].rstrip("/")
-    if urlsplit(base_url).scheme != "https" or not urlsplit(base_url).hostname:
-        raise ValueError("LLM_BASE_URL must be an HTTPS API base URL")
-    return config
+    settings = load_settings()
+    base_url = settings.llm_base_url.rstrip("/")
+    if not base_url or not settings.llm_name:
+        raise ValueError("Configure LLM_BASE_URL and LLM_NAME for Apertus")
+    parsed = urlsplit(base_url)
+    if not parsed.hostname or (parsed.scheme != "https" and not (
+        parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    )):
+        raise ValueError("Use HTTPS for a remote LLM_BASE_URL")
+    return {"LLM_NAME": settings.llm_name, "LLM_BASE_URL": base_url,
+            "settings": replace(settings, llm_base_url=base_url, llm_cache_mode="off")}
 
 
 def chat(config, messages, max_tokens):
-    base_url = config["LLM_BASE_URL"].rstrip("/")
-    payload = dict(model=config["LLM_NAME"], messages=messages, max_tokens=max_tokens,
-                   temperature=0)
-    request = Request(
-        f"{base_url}/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {config['LLM_API_KEY']}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urlopen(request, timeout=90) as response:
-        result = json.load(response)
-    if not result.get("choices"):
-        raise ValueError("Apertus returned no choices")
-    choice = result["choices"][0]
-    if choice.get("finish_reason") == "length":
-        raise ValueError("Apertus response exceeded the output budget")
-    return choice["message"]["content"]
+    # Review conversations can contain private questions. Keep them out of the replay cache.
+    llm = LLMClient(config["settings"])
+    try:
+        with llm.client:
+            return llm.chat(messages, prompt_version="review-json", max_tokens=max_tokens).text
+    except APIError as exc:
+        status = getattr(exc, "status_code", None)
+        raise OSError(f"Apertus HTTP {status}" if status else "Apertus request failed") from None

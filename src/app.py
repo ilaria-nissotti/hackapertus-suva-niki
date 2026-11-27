@@ -38,6 +38,7 @@ app.config.update(MAX_CONTENT_LENGTH=4 * 1024 * 1024,
 pool = ThreadPoolExecutor(max_workers=1)
 pending = set()
 pending_lock = threading.Lock()
+queue_read_lock = threading.Lock()
 
 
 @app.before_request
@@ -98,63 +99,80 @@ def safe_url(value):
     return None
 
 
-def version(record, model):
+def version(record, model, endpoint=""):
     digest = hashlib.sha256(record["full_text"].encode()).hexdigest()
-    return f"{VERSION}:{model}:{digest}"
+    return f"{VERSION}:{model}:{hashlib.sha256(endpoint.encode()).hexdigest()}:{digest}"
 
 
-def current_model():
+def current_config():
     try:
-        return model_config()["LLM_NAME"]
+        return model_config()
     except ValueError:
-        return "unconfigured"
+        return {"LLM_NAME": "unconfigured"}
 
 
-def get_result(db, record, kind, model):
+def generation_version(record, config):
+    return version(record, config["LLM_NAME"], config.get("LLM_BASE_URL", ""))
+
+
+def get_result(db, record, kind, config):
     return db.execute("SELECT * FROM results WHERE case_key=? AND kind=? AND version=?",
-                      (record["key"], kind, version(record, model))).fetchone()
+                      (record["key"], kind, generation_version(record, config))).fetchone()
 
 
 app.register_blueprint(conversation.routes(load_record))
 
 
-def process(key, kind):
-    record = load_record(key)
+def process(key, kind, *, record=None, config=None):
+    record = load_record(key) if record is None else record
     if record is None:
         return False
     with closing(connect()) as db:
-        model = current_model()
-        existing = get_result(db, record, kind, model)
+        config = current_config() if config is None else config
+        model = config["LLM_NAME"]
+        existing = get_result(db, record, kind, config)
         if existing and existing["payload"]:
             return True
         payload = None
         error = None
         try:
-            config = model_config()
+            if not record["full_text"].strip():
+                raise ValueError("The judgment has no usable source text.")
+            if model == "unconfigured":
+                raise ValueError("Missing model configuration")
             if kind == "facts":
                 payload = make_facts(config, record["full_text"])
             else:
-                if not process(key, "facts"):
+                if not process(key, "facts", record=record, config=config):
                     raise ValueError("The factual brief failed. Retry summary generation.")
-                facts = json.loads(get_result(db, record, "facts", model)["payload"])
-                approved = db.execute("""
-                    SELECT approved FROM results WHERE kind=? AND case_key<>? AND approved IS NOT NULL
-                    ORDER BY rowid DESC LIMIT 100
-                """, (kind, key))
-                payload = draft(config, record, facts, kind, [row[0][:6000] for row in approved])
+                facts = json.loads(get_result(db, record, "facts", config)["payload"])
+                with closing(kb()) as repo:
+                    style_examples = repo.list_examples(split="fewshot")
+                payload = draft(config, record, facts, kind, style_examples)
         except (OSError, ValueError, TypeError, KeyError) as exc:
             # Error responses and exception arguments can contain provider/request data.
-            error = (f"Provider HTTP {exc.code}" if hasattr(exc, "code") else
+            error = ("The judgment has no usable source text." if not record["full_text"].strip() else
+                     f"Provider HTTP {exc.code}" if hasattr(exc, "code") else
                      "Missing model configuration" if model == "unconfigured" else
-                     "Request failed or returned invalid source evidence")
+                     "Apertus request failed. Try again." if isinstance(exc, OSError) else
+                     "Could not generate a draft with verified source evidence. Try again.")
             print(f"{key} {kind}: {error}", file=sys.stderr, flush=True)
         with db:
             db.execute("""INSERT INTO results (case_key, kind, version, payload, error)
                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(case_key,kind,version)
-                DO UPDATE SET payload=excluded.payload, error=excluded.error""",
-                       (key, kind, version(record, model),
+                DO UPDATE SET payload=excluded.payload, error=excluded.error
+                WHERE results.payload IS NULL""",
+                       (key, kind, generation_version(record, config),
                         json.dumps(payload, ensure_ascii=False) if payload else None, error))
         return payload is not None
+
+
+def run_summary_job(key, kind):
+    try:
+        return process(key, kind)
+    except Exception as exc:
+        app.logger.error("Summary job failed for %s (%s): %s", key, kind, type(exc).__name__)
+        return False
 
 
 def enqueue(key, kinds):
@@ -165,9 +183,7 @@ def enqueue(key, kinds):
     def run():
         for kind in tasks:
             try:
-                process(key, kind)
-            except sqlite3.Error:
-                app.logger.exception("Could not save %s for %s", kind, key)
+                run_summary_job(key, kind)
             finally:
                 with pending_lock:
                     pending.discard((key, kind))
@@ -175,13 +191,14 @@ def enqueue(key, kinds):
         pool.submit(run)
 
 
-def present(db, record, model):
+def present(db, record, config):
     result = dict(record)
     for kind in ("de", "fr"):
-        row = get_result(db, record, kind, model)
+        row = get_result(db, record, kind, config)
         with pending_lock:
             active = (record["key"], kind) in pending
         result[kind] = {
+            "version": row["version"] if row and row["payload"] else None,
             "data": json.loads(row["payload"]) if row and row["payload"] else {},
             "error": row["error"] if row else None,
             "approved": row["approved"] if row else None,
@@ -190,15 +207,15 @@ def present(db, record, model):
     return result
 
 
-def briefing_context(db, record, lang, model):
+def briefing_context(db, record, lang, config):
     api_key, voice = briefing.voice_config(lang)
-    summary = get_result(db, record, lang, model)
-    ctx = briefing.context(record, summary, model, version(record, model), lang, voice)
+    summary = get_result(db, record, lang, config)
+    ctx = briefing.context(record, summary, config["LLM_NAME"], generation_version(record, config), lang, voice)
     return ctx, api_key, voice
 
 
-def briefing_status(db, record, lang, model):
-    ctx, api_key, _ = briefing_context(db, record, lang, model)
+def briefing_status(db, record, lang, config):
+    ctx, api_key, _ = briefing_context(db, record, lang, config)
     if not ctx:
         return {}
     key, _ = ctx
@@ -251,12 +268,14 @@ def dashboard_data():
         extra = [row[0] for row in db.execute("SELECT case_key FROM review_cases")]
         with closing(kb()) as repo:
             digest = review_kb.current_rules_hash()
-            records = review_kb.window_records(repo, current, extra, digest)
+            # Concurrent SQLite row scans contend heavily in the Python driver.
+            with queue_read_lock:
+                records = review_kb.window_records(repo, current, extra, digest)
             selected = review_kb.get_record(repo, selected_key, digest) if selected_key else None
-        model = current_model()
+        config = current_config()
         if selected:
-            selected = present(db, selected, model)
-        audio = briefing_status(db, selected, lang, model) if selected else {}
+            selected = present(db, selected, config)
+        audio = briefing_status(db, selected, lang, config) if selected else {}
     published_from = current.published_from.isoformat()
     dates = sorted(r["publication_date"] for r in records
                    if r["publication_date"] and published_from <= r["publication_date"] <= current.end.isoformat())
@@ -279,7 +298,7 @@ def dashboard_data():
         stale=sum(r["status"] == "Stale" for r in records),
         unknown_publication=sum(not r["publication_date"] for r in records),
         window=(published_from, current.end.isoformat()),
-        dates=(dates[0], dates[-1]) if dates else None, model=model,
+        dates=(dates[0], dates[-1]) if dates else None, model=config["LLM_NAME"],
         query=query, status=status, sort=sort, page=page,
         message=request.args.get("message"), lang=lang, audio=audio,
         active=bool(audio.get("active") or selected and any(
@@ -295,8 +314,8 @@ def prepare_briefing(key, lang):
     if not record:
         raise ValueError("Judgment not found.")
     with closing(connect()) as db:
-        ctx, api_key, voice = briefing_context(db, record, lang, config["LLM_NAME"])
-        summary = get_result(db, record, lang, config["LLM_NAME"])
+        ctx, api_key, voice = briefing_context(db, record, lang, config)
+        summary = get_result(db, record, lang, config)
         if not summary or not summary["approved"]:
             raise ValueError("Approve this language’s summary before generating audio.")
         if not ctx or not api_key:
@@ -344,7 +363,7 @@ def play_briefing(cache_key):
     if not record:
         abort(404)
     with closing(connect()) as db:
-        ctx, _, _ = briefing_context(db, record, lang, current_model())
+        ctx, _, _ = briefing_context(db, record, lang, current_config())
         if not ctx or ctx[0] != cache_key:
             abort(404)
         row = db.execute("SELECT mp3 FROM briefings WHERE cache_key=?", (cache_key,)).fetchone()
@@ -426,9 +445,9 @@ def approve():
     if record is None:
         abort(404)
     with closing(connect()) as db, db:
-        row = get_result(db, record, lang, current_model())
-        if not row or not row["payload"]:
-            abort(404)
+        row = get_result(db, record, lang, current_config())
+        if not row or not row["payload"] or request.form.get("version") != row["version"]:
+            return action_result(key, "The draft changed. Reload it and review it before approving.", 409)
         db.execute("UPDATE results SET approved=? WHERE case_key=? AND kind=? AND version=?",
                    (summary, key, lang, row["version"]))
     if wants_json():
@@ -447,7 +466,7 @@ def summarize_top(limit, workers):
         print(f"note: {stale} judgements have stale scores: run `python -m suva score` first", file=sys.stderr)
 
     def summarize(row):
-        return sum(not process(row["key"], lang) for lang in ("de", "fr"))
+        return sum(not run_summary_job(row["key"], lang) for lang in ("de", "fr"))
 
     failed = 0
     with ThreadPoolExecutor(max_workers=workers) as executor:

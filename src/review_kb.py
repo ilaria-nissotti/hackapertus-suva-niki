@@ -11,7 +11,9 @@ from pathlib import Path
 
 from suva.parse.run import parse_all
 from suva.scoring.rules import load_rules
-from suva.scoring.store import is_current, rules_hash, score_keys
+from suva.scoring.store import inputs_hash, rules_hash, score_keys
+from suva.parse.segment import PARSER_VERSION
+from suva.sources.quality import usable_text
 from suva.sources.base import SourceRecord, decision_id
 from suva.storage.sqlite import SQLiteRepository
 from suva.windows import Window, challenge_window
@@ -21,7 +23,8 @@ STATUS = {"high": "Relevant", "check": "Review", "low": "Low relevance"}
 
 def open_kb(path):
     repo = SQLiteRepository(Path(path))
-    repo.migrate()
+    if not repo.schema_is_current():
+        repo.migrate()
     return repo
 
 
@@ -35,10 +38,14 @@ def current_rules_hash() -> str:
 
 def record(row, rules_digest):
     """One judgement as the app shows it. `full_text` is the stored judgement text."""
-    current = row["score"] is not None and is_current(
-        {"rules_hash": row["rules_hash"], "parser_version": row["score_parser_version"],
-         "text_hash": row["score_text_hash"]}, row["text"], rules_digest)
-    score = round(row["score"]) if row["score"] is not None else None
+    score = row["score"]
+    current = (
+        score is not None
+        and row["rules_hash"] == rules_digest
+        and row["parser_version"] == row["score_parser_version"] == PARSER_VERSION
+        and row["parse_text_hash"] == row["score_text_hash"]
+        and row["inputs_hash"] == inputs_hash(row["language"], row["parsed_at"])
+    )
     return {
         "key": row["key"], "docket": row["docket"], "title": row["subject"] or row["docket"],
         "decision_date": row["decision_date"], "publication_date": row["publication_date"],
@@ -61,7 +68,7 @@ def window_records(repo, window: Window, extra_keys=(), rules_digest=None):
 
 
 def get_record(repo, key, rules_digest=None):
-    rows = repo.list_review_rows(keys=[key])
+    rows = repo.list_review_rows(keys=[key], include_text=True)
     if not rows:
         return None
     result = record(rows[0], rules_digest or current_rules_hash())
@@ -80,10 +87,19 @@ def find_keys(repo, docket, decision_date=None):
 
 def add_text(repo, docket, text, decision_date=None, publication_date=None, source_url=None):
     """Store an uploaded judgement text, then parse and score it like any fetched one."""
+    if not usable_text(text):
+        raise ValueError("Upload a file containing usable judgment text.")
+    if decision_date is None:
+        raise ValueError("Enter the decision date when uploading judgment text.")
     rec = SourceRecord(source="manual", source_id=decision_id(docket, decision_date), docket=docket,
                        decision_date=decision_date, publication_date=publication_date,
                        url=source_url, text=text)
-    repo.upsert_judgement(rec)
-    parse_all(repo)
-    score_keys(repo, [rec.key], load_rules())
+    rules = load_rules()
+    with repo.transaction():
+        existing = repo.get_judgement(rec.key)
+        if existing and usable_text(existing["text"]) and existing["text"] != text:
+            raise ValueError("This judgment already has source text. Add it from the knowledge base.")
+        repo.upsert_judgement(rec)
+        parse_all(repo, key=rec.key)
+        score_keys(repo, [rec.key], rules)
     return rec.key

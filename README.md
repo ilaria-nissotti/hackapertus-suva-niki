@@ -108,12 +108,19 @@ of date. `--today YYYY-MM-DD` (on `fetch`, `score` and `app.py`) pins the window
 ```
 
 Drafts use the judgment, a shared factual brief, and same-language Suva
-examples from the few-shot split. Successful results are reused by source text,
-model and prompt version, and failed items can be rerun. Approved edits become
-style examples for future drafts. To add a judgment outside the window, use
-**Add judgment** with its case ID (it must be in the knowledge base) or upload
-its text. `src/suva/scoring/README.md` explains how to measure and improve the
-rules (`suva dataset`, `analyze`, `evaluate`, `fit-weights`).
+examples from the frozen few-shot split. Successful results are reused for the
+same source text, inference endpoint, model, and prompt version. Review and
+approve each language in the dashboard. If the draft changes while you are
+editing, reload it before approving. After upgrading an existing review
+database to this version, rerun `suva score` and generate fresh drafts.
+
+Use **Add judgment** to select a case from the knowledge base or upload usable
+judgment text with its decision date. To queue a case that already has source
+text, select it from the knowledge base. See `src/suva/scoring/README.md` for
+ranking evaluation and rule tuning.
+
+Run the offline one-case pipeline regression with
+`.venv/bin/python -m pytest -q tests/test_review_pipeline.py`.
 
 The observed publication dates are shown in the UI. They reflect the sources'
 coverage; the window may contain more cases. The app binds to loopback and

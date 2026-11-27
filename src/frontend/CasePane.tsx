@@ -68,7 +68,7 @@ function Summary({record, lang, audio, action, busy, visible}: {
           const summary = (edit ?? saved).trim();
           setSaveError('');
           setSaveStatus('Saving…');
-          if (await action('/approve', fields({...base, summary}), setSaveError)) {
+          if (await action('/approve', fields({...base, summary, version: result.version ?? ""}), setSaveError)) {
             setEdit(summary);
             setSubmitted(summary);
             setSaveStatus(result.approved ? 'Approved edit saved.' : 'Summary approved.');
@@ -127,7 +127,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       <a className="back" href={close} onClick={onClose}>Back to queue</a>
       <div className="case-identity">
         <div><p className="context">Federal Supreme Court</p><h2 id="case-title">{record.docket}</h2></div>
-        <div className="case-score">{record.score !== null && <strong>{record.score}<small> / 100</small></strong>}
+        <div className="case-score">{record.score !== null && <strong>{Math.round(record.score)}<small> / 100</small></strong>}
           <Status value={record.status}/></div>
       </div>
       {record.title !== record.docket && <p className="case-name">{record.title}</p>}
@@ -158,7 +158,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
         </section>
       </div>
       <div hidden={view !== 'Legal summaries'}>
-        <Summary key={lang} record={record} lang={lang} audio={audio} action={action} busy={busy} visible={view === 'Legal summaries'}/>
+        <Summary key={JSON.stringify([lang, record[lang].version])} record={record} lang={lang} audio={audio} action={action} busy={busy} visible={view === 'Legal summaries'}/>
       </div>
       {view === 'Ask this judgment' && <Conversation key={lang} caseKey={record.key} lang={lang}/>}
     </div>

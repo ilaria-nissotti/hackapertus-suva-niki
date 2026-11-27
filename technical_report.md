@@ -61,8 +61,8 @@ List any external dependencies, and separate build time from runtime.
 Each summary uses the source, a shared factual brief and up to three
 same-language Suva examples from the few-shot split (the evaluation split is
 never shown to the model). The model selects numbered lines and the application
-resolves them directly from the source. Reviewer-approved edits can become
-examples in subsequent requests.
+resolves them directly from the source. The frozen few-shot split is the sole
+source of style examples.
 
 ## 4. Data
 

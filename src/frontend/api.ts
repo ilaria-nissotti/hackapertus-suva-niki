@@ -1,5 +1,5 @@
 export type Language = 'de' | 'fr';
-type Result<T> = {data: Partial<T>; error: string | null; approved: string | null; active: boolean};
+type Result<T> = {version: string | null; data: Partial<T>; error: string | null; approved: string | null; active: boolean};
 export type QueueRow = {
   key: string; docket: string; title: string; publication_date: string | null; decision_date: string | null;
   score: number | null; status: string; issue?: string | null;

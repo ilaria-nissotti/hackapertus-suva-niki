@@ -80,3 +80,56 @@ def test_summaries_run_only_for_known_cases(client, tmp_path):
     seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", SUVA_CASE)
     assert client.post("/run", data={"case": "8C_404/2026@2026-10-01", "action": "summarize"}).status_code == 404
     assert client.post("/run", data={"case": "8C_1/2026@2026-10-01", "action": "triage"}).status_code == 400
+
+
+def test_upload_requires_usable_text_and_a_dated_identity(client, tmp_path):
+    headers = {"Accept": "application/json"}
+
+    def upload(text, **fields):
+        return client.post("/add", headers=headers, data={
+            "docket": "8C_1/2026", "text": (BytesIO(text.encode()), "judgment.txt"), **fields,
+        })
+
+    assert upload("", decision_date="2026-10-01").status_code == 400
+    assert upload(SUVA_CASE).status_code == 400
+    key = seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", SUVA_CASE)
+    assert upload(SUVA_CASE + "\nDifferent text", decision_date="2026-10-01").status_code == 400
+    assert page(client, case=key)["selected"]["full_text"] == SUVA_CASE
+    assert [row["key"] for row in page(client)["rows"]] == [key]
+
+
+def test_failed_job_releases_its_slot_and_attempts_the_other_language(monkeypatch):
+    key = "8C_9999/2026@2026-10-01"
+    attempted = []
+
+    def process(case, kind):
+        assert case == key
+        attempted.append(kind)
+        if kind == "de":
+            raise RuntimeError("Synthetic worker failure")
+
+    class InlineExecutor:
+        def submit(self, task):
+            task()
+
+    monkeypatch.setattr(dashboard, "process", process)
+    monkeypatch.setattr(dashboard, "pool", InlineExecutor())
+    monkeypatch.setattr(dashboard, "pending", set())
+    dashboard.enqueue(key, ("de", "fr"))
+    assert attempted == ["de", "fr"]
+    assert dashboard.pending == set()
+    dashboard.enqueue(key, ("de",))
+    assert attempted == ["de", "fr", "de"]
+    assert dashboard.pending == set()
+
+
+def test_missing_source_text_is_reported_without_a_model_call(client, tmp_path, monkeypatch):
+    key = seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", "")
+    monkeypatch.setattr(dashboard, "model_config", lambda: {"LLM_NAME": "test-model"})
+
+    def unexpected_call(*args):
+        pytest.fail("A missing ruling should never reach Apertus")
+
+    monkeypatch.setattr(dashboard, "make_facts", unexpected_call)
+    assert not dashboard.process(key, "de")
+    assert page(client, case=key)["selected"]["de"]["error"] == "The judgment has no usable source text."

@@ -124,7 +124,7 @@ class ConversationTests(TestCase):
         empty = self.client.get("/api/dashboard", query_string={"q": "missing"}).json
         self.assertIsNone(empty["selected"])
         self.assertEqual(empty["rows"], [])
-        with patch("app.current_model", return_value="model"):
+        with patch("app.current_config", return_value={"LLM_NAME": "model"}):
             response = self.client.get("/api/dashboard", query_string={"case": self.case, "q": self.docket})
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         page = response.json

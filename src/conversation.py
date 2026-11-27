@@ -81,7 +81,7 @@ def app_score(record):
     """The rules score the app shows, as the model may explain it (None if missing or stale)."""
     if record.get("score") is None or not record.get("score_current"):
         return None
-    return {"score": record["score"], "band": record["band"],
+    return {"score": round(record["score"]), "band": record["band"],
             "reasons": [f"{f['points']:+g} {f['explanation']}" for f in record["fired"]]}
 
 

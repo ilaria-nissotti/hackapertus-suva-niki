@@ -38,8 +38,12 @@ class ScoreRunReport:
 
 def rules_hash(ruleset: RuleSet) -> str:
     """Hash of everything that changes a score (comments and evidence notes in rules.yaml don't)."""
-    return sha256(repr(([(r.id, r.field, r.weight, r.any, r.all, r.regex, r.case_sensitive, r.per_match, r.max)
+    return sha256(repr(([(r.id, r.field, r.weight, r.any, r.all, r.regex, r.case_sensitive, r.per_match, r.max, r.explanation)
                          for r in ruleset.rules], ruleset.base, ruleset.scale, ruleset.threshold, ruleset.bands)))
+
+
+def inputs_hash(language, parsed_at):
+    return sha256([language, parsed_at])
 
 
 def text_hash(text: str | None) -> str | None:
@@ -62,7 +66,7 @@ def score_window(repo: Repository, window: Window, ruleset: RuleSet) -> ScoreRun
 def score_keys(repo: Repository, keys: list[str], ruleset: RuleSet) -> ScoreRunReport:
     """Score single judgements (e.g. one a reviewer added by hand), whatever their dates."""
     wanted = set(keys)
-    rows = [r for r in repo.list_judgements() if r["key"] in wanted]
+    rows = [row for key in sorted(wanted) if (row := repo.get_judgement(key)) is not None]
     return _score_rows(repo, rows, ruleset, None)
 
 
@@ -77,7 +81,8 @@ def _score_rows(repo: Repository, judgements: list[dict[str, Any]], ruleset: Rul
         rows.append({
             "key": row["key"], "score": result.score, "points": result.points, "band": result.band,
             "fired": [{"id": f.id, "points": f.points, "explanation": f.explanation} for f in result.fired],
-            "rules_hash": rep.rules_hash, "parser_version": record["parser_version"],
+            "rules_hash": rep.rules_hash, "parser_version": None if record["parse_stale"] else record["parser_version"],
+            "inputs_hash": inputs_hash(record["language"], record["parsed_at"]),
             "text_hash": text_hash(record["text"]),
         })
         bands[result.band] += 1

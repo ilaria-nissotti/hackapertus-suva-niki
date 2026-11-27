@@ -167,4 +167,8 @@ MIGRATIONS: list[tuple[str, str]] = [
         CREATE INDEX relevance_scores_score ON relevance_scores (score);
         """,
     ),
+    (
+        "007_relevance_score_inputs",
+        "ALTER TABLE relevance_scores ADD COLUMN inputs_hash TEXT;\n",
+    ),
 ]
