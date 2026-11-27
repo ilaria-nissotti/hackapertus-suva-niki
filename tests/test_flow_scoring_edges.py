@@ -169,11 +169,10 @@ def test_invalid_rules_are_rejected_with_a_message(data, message):
         parse_rules(data)
 
 
-def test_non_string_regex_raises_type_error_not_rules_error():
-    # BUG: a regex given as a number is not validated; re.compile raises TypeError instead of a
-    # RulesError naming the rule. Expected: RulesError("rule #1 ('r'): ... regex must be a string").
-    with pytest.raises(TypeError):
-        parse_rules({"rules": [rule(match={"regex": 5})]})
+@pytest.mark.parametrize("regex", [5, None, ["UVG"], True])
+def test_non_string_regex_is_a_rules_error(regex):
+    with pytest.raises(RulesError, match=r"rule #1 \('r'\): match.regex must be a string"):
+        parse_rules({"rules": [rule(match={"regex": regex})]})
 
 
 def test_empty_rules_list_is_allowed_and_scores_base_only():
