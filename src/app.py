@@ -546,9 +546,17 @@ def startup_problems():
         required.append(f"LLM: {exc} (see .env.example; check with `python -m suva llm-ping`)")
     if not (FRONTEND / "index.html").is_file():
         required.append("frontend not built: run `npm --prefix src/frontend ci && npm --prefix src/frontend run build`")
-    if not Path(app.config["KB"]).is_file():
-        required.append(f"knowledge base {app.config['KB']} not found: run `python -m suva init-db`, `fetch`, "
+    kb_path = Path(app.config["KB"])
+    if not kb_path.is_file():
+        required.append(f"knowledge base {kb_path} not found: run `python -m suva init-db`, `fetch`, "
                         "`parse` and `score`")
+    else:
+        try:  # read-only: the check must never create or change the file
+            with closing(sqlite3.connect(f"{kb_path.resolve().as_uri()}?mode=ro", uri=True)) as probe:
+                probe.execute("SELECT name FROM sqlite_master LIMIT 1").fetchall()
+        except sqlite3.Error as exc:
+            required.append(f"knowledge base {kb_path} is not a readable SQLite database ({exc}): restore it "
+                            "or run `python -m suva init-db` with a new DATABASE_URL")
     for lang in briefing.LANGUAGES:
         api_key, voice = briefing.voice_config(lang)
         if not api_key or not voice:

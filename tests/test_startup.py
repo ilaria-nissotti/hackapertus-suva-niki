@@ -84,3 +84,21 @@ def test_serve_starts_after_a_passing_check(ready, monkeypatch):
     monkeypatch.setattr(dashboard.app, "run", lambda **kw: started.append(kw))
     monkeypatch.setattr("sys.argv", ["app.py", "serve", "--strict", "--port", "5999"])
     assert dashboard.main() == 0 and started == [{"host": "127.0.0.1", "port": 5999}]
+
+
+@pytest.mark.parametrize("content", [b"not a database at all", b"SQLite format 3\x00" + b"\xff" * 200, b"\x00" * 4096])
+def test_a_file_that_is_not_sqlite_is_a_required_problem(ready, content):
+    bad = ready / "bad.sqlite"
+    bad.write_bytes(content)
+    with patch.dict(dashboard.app.config, KB=bad):
+        required, _ = dashboard.startup_problems()
+        assert dashboard.check_startup(strict=True) is False
+    assert len(required) == 1 and "is not a readable SQLite database" in required[0]
+    assert bad.read_bytes() == content  # the check never writes to the file
+
+
+def test_an_empty_file_is_an_empty_sqlite_database_and_passes(ready):
+    empty = ready / "empty.sqlite"
+    empty.write_bytes(b"")
+    with patch.dict(dashboard.app.config, KB=empty):
+        assert dashboard.startup_problems()[0] == []  # SQLite treats it as a new database; the app migrates it
