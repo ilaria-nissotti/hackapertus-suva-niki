@@ -424,20 +424,24 @@ def test_failed_facts_message_is_replaced_by_the_generic_draft_error(client, cas
     assert result_row(case, "de")["error"] == "Could not generate a draft with verified source evidence. Try again."
 
 
-def test_invalid_model_config_is_reported_as_missing(client, case, monkeypatch):
-    from bger import model_config as real_model_config
-
+@pytest.mark.parametrize("url, name, message", [
+    ("http://remote.example/v1", "m", "Use HTTPS for a remote LLM_BASE_URL"),
+    ("", "m", "Configure LLM_BASE_URL and LLM_NAME for Apertus"),
+])
+def test_invalid_model_config_shows_the_real_reason(client, case, monkeypatch, url, name, message):
     monkeypatch.undo()  # restore the real current_config / model_config
     with patch("bger.load_settings") as settings:
-        settings.return_value.llm_base_url = "http://remote.example/v1"
-        settings.return_value.llm_name = "m"
-        with pytest.raises(ValueError, match="Use HTTPS"):
-            real_model_config()
+        settings.return_value.llm_base_url = url
+        settings.return_value.llm_name = name
+        assert dashboard.current_config() == {"LLM_NAME": "unconfigured", "error": message}
         assert not dashboard.process(case, "de")  # config=None -> current_config()
-    unconfigured = {"LLM_NAME": "unconfigured"}
-    # BUG: current_config maps every ValueError to "unconfigured", so an http:// endpoint is shown
-    # as "Missing model configuration". Expected: "Use HTTPS for a remote LLM_BASE_URL".
-    assert result_row(case, "de", unconfigured)["error"] == "Missing model configuration"
+    unconfigured = {"LLM_NAME": "unconfigured"}  # same generation version as with the error text
+    assert result_row(case, "de", unconfigured)["error"] == message
+
+
+def test_unconfigured_without_a_reason_keeps_the_generic_message(client, case):
+    assert not dashboard.process(case, "de", config={"LLM_NAME": "unconfigured"})
+    assert result_row(case, "de", {"LLM_NAME": "unconfigured"})["error"] == "Missing model configuration"
 
 
 def test_process_without_source_text_needs_no_model(client, tmp_path):

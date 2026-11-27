@@ -108,8 +108,8 @@ def version(record, model, endpoint=""):
 def current_config():
     try:
         return model_config()
-    except ValueError:
-        return {"LLM_NAME": "unconfigured"}
+    except ValueError as exc:
+        return {"LLM_NAME": "unconfigured", "error": str(exc)}
 
 
 def generation_version(record, config):
@@ -154,7 +154,7 @@ def process(key, kind, *, record=None, config=None):
             # Error responses and exception arguments can contain provider/request data.
             error = ("The judgment has no usable source text." if not record["full_text"].strip() else
                      f"Provider HTTP {exc.code}" if hasattr(exc, "code") else
-                     "Missing model configuration" if model == "unconfigured" else
+                     config.get("error", "Missing model configuration") if model == "unconfigured" else
                      "Apertus request failed. Try again." if isinstance(exc, OSError) else
                      "Could not generate a draft with verified source evidence. Try again.")
             print(f"{key} {kind}: {error}", file=sys.stderr, flush=True)
