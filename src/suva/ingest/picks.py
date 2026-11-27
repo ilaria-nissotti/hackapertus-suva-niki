@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from suva.ingest.exports import DOCKET_RE
+from suva.sources.base import DOCKET_RE
 
 BARE_NUMBER_RE = re.compile(r"(?<![\w_])(\d{1,4})/(\d{4})\b")
 CANTONAL_RE = re.compile(
@@ -50,7 +50,7 @@ def normalise_pick(raw: str, known_dockets: set[str]) -> tuple[str | None, str, 
     raw = " ".join(str(raw).split())
     m = DOCKET_RE.search(raw)
     if m:
-        return f"{m[1]}_{m[2]}/{m[3]}", "bger", []
+        return m.group(), "bger", []
     if CANTONAL_RE.search(raw):
         return None, "cantonal", ["cantonal decision: not on bger.ch, excluded from bger recall"]
     b = BARE_NUMBER_RE.search(raw)

@@ -161,3 +161,68 @@ def test_error_page_without_fallback_is_reported(tmp_path, repo):
     rep = fetch(repo, raw, Window("dev", date(2025, 10, 1), date(2025, 10, 7)),
                 use_entscheidsuche=False, include_picks=False)
     assert rep.still_without_text == []  # OCL text was fine
+
+
+def test_pick_attachment_is_read_once_when_it_also_provides_text(tmp_path, repo):
+    raw = tmp_path / "raw"
+    parquet(raw, [("8C_1/2025", "2025-10-02")])
+    docket = "8C_2/2025"
+    repo.upsert_known_positive(dict(ref=docket, docket=docket, court="bger", in_xlsx=1, in_exports=0))
+    calls = []
+    client = es_client([es_hit(docket, "2025-10-02")], calls)
+    report = fetch(repo, raw, Window("dev", date(2025, 10, 1), date(2025, 10, 7)), client=client)
+    assert len(calls) == report.html_fetched == report.picks_found == 1
+    assert report.text_fallback == ["8C_2/2025@2025-10-02"]
+    assert not report.errors
+
+
+def test_source_failure_can_still_complete_other_listing(tmp_path, repo):
+    bad = tmp_path / "raw" / "opencaselaw" / "bger.parquet"
+    bad.parent.mkdir(parents=True)
+    bad.write_text("not parquet")
+    client = es_client([es_hit("8C_2/2025", "2025-10-02")], [])
+    report = fetch(repo, tmp_path / "raw", Window("dev", date(2025, 10, 1), date(2025, 10, 7)), client=client)
+    assert report.source_runs["opencaselaw"]["status"] == "failed"
+    assert report.source_runs["entscheidsuche"]["status"] == "complete"
+    assert report.entscheidsuche == 1 and len(report.errors) == 1
+
+
+def test_fetch_cli_requires_both_custom_dates(capsys):
+    import pytest
+
+    from suva.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main(["fetch", "--start", "2025-10-01"])
+    assert exc.value.code == 2
+    assert "requires both" in capsys.readouterr().err
+
+
+def test_docket_only_pick_with_two_decisions_is_ambiguous(tmp_path, repo):
+    docket = "8C_1/2025"
+    raw = tmp_path / "raw"
+    parquet(raw, [(docket, "2025-10-02"), (docket, "2025-10-03")])
+    repo.upsert_known_positive(dict(ref=docket, docket=docket, court="bger", in_xlsx=1, in_exports=0))
+    report = fetch(repo, raw, Window("dev", date(2025, 10, 1), date(2025, 10, 7)), use_entscheidsuche=False)
+    assert report.picks_ambiguous == [docket]
+    assert report.picks_found == report.picks_listed == 0
+
+
+def test_attachment_refusal_preserves_listings_and_stops_attachment_fetches(tmp_path, repo):
+    raw = tmp_path / "raw"
+    parquet(raw, [("8C_1/2025", "2025-10-02")])
+    hits = [es_hit(f"8C_{i}/2025", "2025-10-02")[1] for i in (2, 3)]
+    html_requests = []
+
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(200, json={"hits": {"total": {"value": 2}, "hits": hits}})
+        html_requests.append(request)
+        return httpx.Response(403)
+
+    client = PoliteClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    report = fetch(repo, raw, Window("dev", date(2025, 10, 1), date(2025, 10, 7)), client=client)
+    assert len(html_requests) == 1
+    assert report.entscheidsuche == 2
+    assert report.still_without_text == ["8C_2/2025@2025-10-02", "8C_3/2025@2025-10-02"]
+    assert report.source_runs["entscheidsuche"]["status"] == "blocked"

@@ -52,3 +52,18 @@ def test_parse_pick_report_uses_exact_decision(repo):
     report = parse_all(repo)
     assert report.watched_not_ok == [f"{docket}@2025-10-03 (no_text)"]
     assert not report.picks_not_ok
+
+
+def test_parse_reports_text_changed_during_save(repo, monkeypatch):
+    add(repo, "8C_1/2025", GOOD)
+    original_save = repo.save_parse
+
+    def save_after_update(segmentation, citations, text_hash):
+        add(repo, "8C_1/2025", GOOD + " Latest text.")
+        return original_save(segmentation, citations, text_hash)
+
+    monkeypatch.setattr(repo, "save_parse", save_after_update)
+    report = parse_all(repo)
+    assert report.status == {"stale": 1}
+    assert report.issues == {"text_changed_during_parse": 1}
+    assert repo.list_passages("8C_1/2025@2025-10-02") == []

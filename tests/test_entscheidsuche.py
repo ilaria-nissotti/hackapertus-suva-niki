@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from suva.http import PoliteClient
-from suva.sources.entscheidsuche import fetch_html, list_bger
+from suva.sources.entscheidsuche import load_judgement, list_bger
 
 
 def hit(i, d, refs=None):
@@ -62,12 +62,12 @@ def test_api_error_raises():
         list(list_bger(c, date(2025, 10, 1), date(2025, 10, 1)))
 
 
-def test_fetch_html_cached(tmp_path):
+def test_load_judgement_cached(tmp_path):
     calls = []
-    c = make_client(lambda r: calls.append(1) or httpx.Response(200, text="<b>8C_1/2025</b><div class='para'>Erwägungen</div>"))
+    c = make_client(lambda r: calls.append(1) or httpx.Response(200, text="<b>8C_1/2025</b><div class='para'>Erwägungen:</div>"))
     rec = next(iter(list_bger(make_client(lambda r: httpx.Response(200, json={
         "hits": {"total": {"value": 1}, "hits": [hit(1, "2025-10-01")]}})), date(2025, 10, 1), date(2025, 10, 1))))
-    assert fetch_html(c, rec, tmp_path) == fetch_html(c, rec, tmp_path)
+    assert load_judgement(c, rec, tmp_path) == load_judgement(c, rec, tmp_path)
     assert len(calls) == 1
 
 
@@ -78,5 +78,60 @@ def test_invalid_html_is_never_cached(tmp_path):
                        html_url="https://entscheidsuche.ch/sample.html")
     client = make_client(lambda _: httpx.Response(200, text="<p>Service unavailable</p>"))
     with pytest.raises(ValueError, match="expected judgement"):
-        fetch_html(client, rec, tmp_path)
+        load_judgement(client, rec, tmp_path)
     assert not list(tmp_path.iterdir())
+
+
+def test_incomplete_listing_is_reported():
+    from suva.sources.entscheidsuche import SourceResponseError
+
+    http = make_client(lambda _: httpx.Response(200, json={
+        "hits": {"total": {"value": 2}, "hits": [hit(1, "2025-10-01")]},
+    }))
+    with pytest.raises(SourceResponseError, match="Incomplete listing"):
+        list(list_bger(http, date(2025, 10, 1), date(2025, 10, 1)))
+
+
+def test_valid_short_order_replaces_invalid_cache(tmp_path):
+    from suva.sources.base import SourceRecord
+
+    rec = SourceRecord("entscheidsuche", "sample", "8C_1/2025", date(2025, 10, 1),
+                       html_url="https://entscheidsuche.ch/sample.html")
+    path = tmp_path / "sample.html"
+    path.write_text("<p>Service unavailable</p>")
+    html = ("<div class='para'>8C_1/2025</div><div class='para'>In Erwägung,</div>"
+            "<div class='para'>dass die Beschwerde unzulässig ist,</div>"
+            "<div class='para'>erkennt die Präsidentin:</div>")
+    http = make_client(lambda _: httpx.Response(200, text=html))
+    document = load_judgement(http, rec, tmp_path)
+    assert document.path == path and path.read_text() == html
+    assert "In Erwägung," in document.text
+
+
+def test_attachment_url_and_redirect_are_restricted(tmp_path):
+    from dataclasses import replace
+
+    from suva.sources.base import SourceRecord
+
+    requests = []
+
+    def redirect(request):
+        requests.append(request.url.host)
+        return httpx.Response(302, headers={"Location": "https://other.test/redirect"})
+
+    rec = SourceRecord("entscheidsuche", "sample", "8C_1/2025", date(2025, 10, 1),
+                       html_url="https://entscheidsuche.ch/sample.html")
+    http = make_client(redirect)
+    with pytest.raises(ValueError, match="HTTPS entscheidsuche"):
+        load_judgement(http, replace(rec, html_url="https://other.test/sample.html"), tmp_path)
+    with pytest.raises(httpx.HTTPStatusError):
+        load_judgement(http, rec, tmp_path)
+    assert requests == ["entscheidsuche.ch"]
+
+
+def test_listing_rejects_string_instead_of_reference_list():
+    http = make_client(lambda _: httpx.Response(200, json={
+        "hits": {"total": {"value": 1}, "hits": [hit(1, "2025-10-01", refs="8C_1/2025")]},
+    }))
+    with pytest.raises(RuntimeError, match="Invalid decision"):
+        list(list_bger(http, date(2025, 10, 1), date(2025, 10, 1)))

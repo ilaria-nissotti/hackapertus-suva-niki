@@ -1,19 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 
 
-def judgement_key(docket: str, decision_date: date | None) -> str:
-    """One docket can carry several decisions, so the key is docket + decision date.
+DOCKET_RE = re.compile(r"\b\d{1,2}[A-Z]_\d{1,4}/\d{4}\b")
 
-    Same format as suva.ingest.exports.decision_id ('8C_129/2025@2025-11-11'), so
-    example summaries and judgements join directly. '#' stays reserved for
-    passage ids ('8C_129/2025@2025-11-11#E.3.2').
-    """
-    from suva.ingest.exports import decision_id
-
-    return decision_id(docket, decision_date.isoformat() if decision_date else None)
+def decision_id(docket: str, decision_date: date | str | None) -> str:
+    """A docket can have several dated decisions."""
+    return f"{docket}@{decision_date}" if decision_date else docket
 
 
 @dataclass
@@ -34,7 +30,7 @@ class SourceRecord:
 
     @property
     def key(self) -> str:
-        return judgement_key(self.docket, self.decision_date)
+        return decision_id(self.docket, self.decision_date)
 
 
 def parse_iso_date(value: str | None) -> date | None:

@@ -1,19 +1,10 @@
-"""OpenCaseLaw (huggingface.co/datasets/voilaj/swiss-caselaw), data licence CC0-1.0.
-
-All BGer decisions with full text are in one parquet file (~925 MB, refreshed
-nightly). We download it once into data/raw/ and filter locally, so the
-pipeline puts no load on any court server.
-
-Measured 2026-11-27: has all 82 Suva-picked BGer dockets; newest decision is
-more recent than entscheidsuche's; publication_date is filled for ~37% of rows
-(recent scrapes only).
-"""
+"""Read the cached OpenCaseLaw BGer Parquet snapshot."""
 
 from __future__ import annotations
 
-import os
 from datetime import date, timedelta
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Iterator
 
 import httpx
@@ -33,18 +24,26 @@ COLUMNS = [
 ]
 
 
-def download_bger(dest: Path, refresh: bool = False, url: str = BGER_URL) -> Path:
+def download_bger(dest: Path, refresh: bool = False) -> Path:
     """Stream the parquet to dest (via a .part file so a broken download never looks complete)."""
     if dest.exists() and not refresh:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    part = dest.with_suffix(dest.suffix + ".part")
-    with httpx.stream("GET", url, headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=120) as r:
-        r.raise_for_status()
-        with open(part, "wb") as f:
-            for chunk in r.iter_bytes(1 << 20):
-                f.write(chunk)
-    os.replace(part, dest)
+    with NamedTemporaryFile(dir=dest.parent, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            with httpx.stream("GET", BGER_URL, headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=120) as response:
+                response.raise_for_status()
+                for chunk in response.iter_bytes(1 << 20):
+                    output.write(chunk)
+            output.close()
+            schema = pq.read_schema(temporary)
+            missing = set(COLUMNS) - set(schema.names)
+            if missing:
+                raise pa.ArrowInvalid(f"OpenCaseLaw snapshot missing columns: {', '.join(sorted(missing))}")
+            temporary.replace(dest)
+        finally:
+            temporary.unlink(missing_ok=True)
     return dest
 
 
@@ -71,11 +70,7 @@ def read_bger(
     with_text: bool = True,
     published_from: date | None = None,
 ) -> Iterator[SourceRecord]:
-    """Decisions with start <= decision_date <= end and/or docket in `dockets`.
-
-    Duplicate rows (same docket + decision date) are collapsed, preferring the
-    row that has full text, then the longer text.
-    """
+    """Select decisions and keep the best available text for each dated docket."""
     filters = []
     if start:
         filters.append(("decision_date", ">=", start.isoformat()))
@@ -91,13 +86,22 @@ def read_bger(
         if end:
             in_window = in_window & (published < (end + timedelta(days=1)).isoformat())
         selection = in_window | (published.is_null() & selection)
-    table = pq.read_table(path, columns=cols, filters=selection)
-
     best: dict[str, SourceRecord] = {}
-    for row in table.to_pylist():
-        row.setdefault("full_text", None)
-        rec = _to_record(row)
-        prev = best.get(rec.key)
-        if prev is None or len(rec.text or "") > len(prev.text or ""):
-            best[rec.key] = rec
+    dataset = ds.dataset(path, format="parquet")
+    for batch in dataset.to_batches(columns=cols, filter=selection, batch_size=1024):
+        for row in batch.to_pylist():
+            rec = _to_record(row)
+            prev = best.get(rec.key)
+            if prev is None:
+                best[rec.key] = rec
+            elif len(rec.text or "") > len(prev.text or ""):
+                rec.publication_date = rec.publication_date or prev.publication_date
+                best[rec.key] = rec
+            elif not prev.publication_date:
+                prev.publication_date = rec.publication_date
     yield from best.values()
+
+
+def publication_dates(path: Path, start: date, end: date) -> dict[str, date]:
+    return {rec.key: rec.publication_date for rec in read_bger(path, start, end, with_text=False)
+            if rec.publication_date}

@@ -34,8 +34,7 @@ class Settings:
     def sqlite_path(self) -> Path:
         if not self.database_url.startswith("sqlite:///"):
             raise ValueError(f"Only sqlite:/// DATABASE_URL is supported so far, got {self.database_url!r}")
-        p = Path(self.database_url.removeprefix("sqlite:///"))
-        return p if p.is_absolute() else REPO_ROOT / p
+        return _resolve(self.database_url.removeprefix("sqlite:///"))
 
     @property
     def llm_cache_path(self) -> Path:
@@ -43,8 +42,7 @@ class Settings:
 
 
 def _resolve(path: str) -> Path:
-    p = Path(path)
-    return p if p.is_absolute() else REPO_ROOT / p
+    return REPO_ROOT / path
 
 
 def load_settings(env_file: Path | None = None, environ: dict[str, str] | None = None) -> Settings:

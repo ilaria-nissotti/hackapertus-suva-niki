@@ -1,13 +1,4 @@
-"""The two time windows (solution_planning.md): never mixed.
-
-- dev: the period of Suva's xlsx (2025 Q4 - 2026 Q1); labelled, used for tuning.
-- challenge: decisions published in the last 3 months before the run.
-
-Sources give the decision date; publication date only sometimes. Measured on
-OpenCaseLaw 2026-11-27: publication follows decision by median 22 days,
-p90 43, p99 75. Use publication date for the confirmed challenge cohort. The widened decision
-date range is for discovery and for separately reporting unknown publication dates.
-"""
+"""Decision-date discovery ranges and the challenge publication window."""
 
 from __future__ import annotations
 
@@ -25,6 +16,13 @@ class Window:
     start: date  # inclusive, by decision date
     end: date  # inclusive
     published_from: date | None = None  # the real "last 3 months" boundary
+
+    def __post_init__(self) -> None:
+        if self.start > self.end:
+            raise ValueError("Window start must be on or before its end")
+
+    def includes_publication(self, published: date | None) -> bool:
+        return self.published_from is None or published is None or self.published_from <= published <= self.end
 
     def __str__(self) -> str:
         return f"{self.name}: decisions {self.start} .. {self.end}"

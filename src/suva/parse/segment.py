@@ -1,21 +1,4 @@
-"""Split a BGer judgement (plain text, OpenCaseLaw) into passages.
-
-Layout, identical in DE / FR / IT:
-  header   court, docket, date, chamber, panel, parties, subject (Gegenstand)
-  facts    "Sachverhalt:" / "Faits :" / "Fatti:"          (often lettered A., B.)
-  reasons  "Erwägungen:" / "Considérant en droit :" / "Diritto:" with numbered
-           considerations 1. / 2.1. / 4.1.3.  -> one passage per number (E.4.1.3)
-  outcome  "Demnach erkennt das Bundesgericht:" / "Par ces motifs" / "Per questi motivi"
-
-Short orders ("Nach Einsicht … in Erwägung, dass …") have unnumbered reasons.
-
-Never lose text (decided in step 4, to avoid false negatives): every paragraph
-lands in exactly one passage, and if no reasoning section is found the body
-becomes one "full" passage and the decision is flagged, not dropped.
-
-Passage ids: "<judgement key>#E.3.2", "#header", "#facts", "#reasons",
-"#dispositiv", "#full".
-"""
+"""Split DE, FR, and IT decisions into verbatim passages with source offsets."""
 
 from __future__ import annotations
 
@@ -24,14 +7,14 @@ from dataclasses import dataclass, field
 
 from suva.sources.quality import is_error_page
 
-PARSER_VERSION = "segment-v2"
+PARSER_VERSION = "segment-v3"
 MIN_TEXT_CHARS = 1000
 
 FACTS_RE = re.compile(r"^(Sachverhalt|Faits|Fatti)\s*:?$", re.I)
 REASONS_RE = re.compile(
-    r"^(Erwägungen?|Erwägung|Considérant en droit|Considérants?|Considérant en fait et en droit|"
+    r"^(Erwägung(?:en?)?|Considérant en droit|Considérants?|Considérant en fait et en droit|"
     r"Considerando in diritto|Considerando in fatto e in diritto|Diritto|in Erwägung,?|"
-    r"Ritenuto in fatto e considerando in diritto|Ritenuto in fatto e in diritto|"
+    r"Ritenuto in fatto e considerando in diritto|Ritenuto in fatto e in diritto|ritiene|"
     r"considérant,?|considerando,?|"
     # single-judge orders: "Le Président :", "La Juge présidant:", "Die Präsidentin zieht in Erwägung:"
     # (a name after the colon would be the signature, so the colon must end the line)
@@ -47,7 +30,7 @@ DISPOSITIV_RE = re.compile(
     re.I,
 )
 # a consideration number alone ("4.1.") or opening a paragraph ("4.1. Text …")
-NUM_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.?(?:\s+(.*))?$", re.S)
+NUM_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.?(?:\s+.*)?$", re.S)
 
 PARTIES_RE = re.compile(r"^(Verfahrensbeteiligte|Participants à la procédure|Partecipanti al procedimento|Parties)$", re.I)
 SUBJECT_RE = re.compile(r"^(Gegenstand|Objet|Oggetto)$", re.I)
@@ -89,8 +72,7 @@ def paragraphs(text: str) -> list[_Para]:
     for m in re.finditer(r"\S(?:.*?\S)?(?=\n\s*\n|\s*\Z)", text, re.S):
         norm = re.sub(r"\s+", " ", m.group(0)).strip()
         norm = re.sub(r"\(\s+", "(", re.sub(r"\s+\)", ")", norm))
-        if norm:
-            out.append(_Para(norm, m.start(), m.end()))
+        out.append(_Para(norm, m.start(), m.end()))
     return out
 
 
@@ -100,10 +82,7 @@ def _plausible_next(prev: tuple[int, ...] | None, cand: tuple[int, ...]) -> bool
         return cand in ((1,), (1, 1))
     if cand == prev + (1,):
         return True
-    for i in range(len(prev)):
-        if cand == prev[:i] + (prev[i] + 1,):
-            return True
-    return False
+    return any(cand == prev[:i] + (number + 1,) for i, number in enumerate(prev))
 
 
 def _find(paras: list[_Para], rx: re.Pattern, start: int = 0, max_len: int = 160) -> int | None:
@@ -127,100 +106,72 @@ def _header_fields(seg: Segmentation, header: list[_Para]) -> None:
         seg.subject = " ".join(texts[si + 1:])
 
 
-def segment(key: str, text: str | None) -> Segmentation:
-    seg = Segmentation(key=key, status="ok")
-    if not text or not text.strip():
-        seg.status, seg.issues = "failed", ["no_text"]
-        return seg
-    if is_error_page(text):
-        seg.status, seg.issues = "failed", ["source_error_page"]
-        return seg
-    if len(text) < MIN_TEXT_CHARS:
-        seg.issues.append("too_short")
-    paras = paragraphs(text)
-
-    i_reasons = _find(paras, REASONS_RE)
-    i_facts = _find(paras, FACTS_RE)
-    if i_facts is not None and i_reasons is not None and i_facts > i_reasons:
-        i_facts = None
-    i_disp = _find(paras, DISPOSITIV_RE, i_reasons + 1 if i_reasons is not None else 0, max_len=200)
-
-    def add(kind: str, ps: list[_Para], number: str | None = None, suffix: str | None = None) -> None:
-        if not ps:
-            return
-        start, end = ps[0].start, ps[-1].end
-        seg.passages.append(Passage(f"{key}#{suffix or kind}", kind, number, text[start:end], start, end))
-
-    if i_reasons is None:
-        seg.issues.append("no_reasons_heading")
-        # keep the header if we can recognise it, else everything is one passage
-        sub = _find(paras, SUBJECT_RE)
-        cut = sub + 2 if sub is not None and sub + 2 <= len(paras) else 0
-        if i_disp is not None:
-            cut = min(cut, i_disp)
-        header = paras[:cut]
-        add("header", header)
-        _header_fields(seg, header)
-        body_end = i_disp if i_disp is not None else len(paras)
-        add("full", paras[cut:body_end])
-        if i_disp is not None:
-            add("dispositiv", paras[i_disp:])
-        else:
-            seg.issues.append("no_dispositiv")
-        seg.status = "failed"
-        return seg
-
-    head_end = i_facts if i_facts is not None else i_reasons
-    header = paras[:head_end]
-    add("header", header)
-    _header_fields(seg, header)
-    if i_facts is not None:
-        add("facts", paras[i_facts:i_reasons])
-    else:
-        seg.issues.append("no_facts_heading")  # common: facts merged into reasons
-
-    reasons_end = i_disp if i_disp is not None else len(paras)
-    reasons = paras[i_reasons:reasons_end]
-    if i_disp is None:
-        seg.issues.append("no_dispositiv")
-
-    # split reasons into numbered considerations
-    current: list[_Para] = [reasons[0]]  # the heading ("Erwägungen:") + any intro
-    cur_num: tuple[int, ...] | None = None
-    found_numbers = 0
-
-    def flush() -> None:
-        if cur_num is None:
-            add("reasons", current)
-        else:
-            n = ".".join(map(str, cur_num))
-            add("consideration", current, number=n, suffix=f"E.{n}")
-
-    for p in reasons[1:]:
-        m = NUM_RE.match(p.text)
-        cand = tuple(int(x) for x in m.group(1).split(".")) if m else None
-        if cand and _plausible_next(cur_num, cand):
-            flush()
-            current, cur_num = [p], cand
-            found_numbers += 1
-        else:
-            current.append(p)
-    flush()
-    if found_numbers == 0:
-        seg.issues.append("no_numbered_considerations")
-
-    if i_disp is not None:
-        add("dispositiv", paras[i_disp:])
-
-    hard = {"no_dispositiv", "too_short"}
-    if hard & set(seg.issues) or (found_numbers == 0 and not _is_short_order(reasons)):
-        seg.status = "partial"
-    return seg
-
-
 ORDER_CLAUSE = ("dass ", "que ", "qu'", "qu’", "che ", "vu ", "visto ", "in erwägung", "considérant", "considerando")
 
 
-def _is_short_order(reasons: list[_Para]) -> bool:
-    """Orders reason in 'dass … / que … / che …' clauses, without numbered considerations."""
-    return any(p.text.lower().startswith(ORDER_CLAUSE) for p in reasons[1:6])
+def _reason_spans(paras: list[_Para], start: int, end: int):
+    """Yield the reasoning introduction and each numbered consideration."""
+    number = None
+    first = start
+    for i in range(start + 1, end):
+        match = NUM_RE.match(paras[i].text)
+        if match:
+            candidate = tuple(map(int, match[1].split(".")))
+            if _plausible_next(number, candidate):
+                yield first, i, number
+                first, number = i, candidate
+    yield first, end, number
+
+
+def segment(key: str, text: str | None) -> Segmentation:
+    if not text or not text.strip():
+        return Segmentation(key, "failed", issues=["no_text"])
+    if is_error_page(text):
+        return Segmentation(key, "failed", issues=["source_error_page"])
+
+    seg = Segmentation(key, "ok")
+    short_text = len(text) < MIN_TEXT_CHARS
+    if short_text:
+        seg.issues.append("too_short")
+    paras = paragraphs(text)
+    reasons = _find(paras, REASONS_RE)
+    outcome = _find(paras, DISPOSITIV_RE, 0 if reasons is None else reasons + 1, max_len=200)
+    body_end = len(paras) if outcome is None else outcome
+
+    spans = []
+    if reasons is None:
+        subject = _find(paras, SUBJECT_RE)
+        header_end = min(subject + 2, body_end) if subject is not None and subject + 2 <= len(paras) else 0
+        spans.append(("full", header_end, body_end, None))
+        seg.issues.append("no_reasons_heading")
+        seg.status = "failed"
+    else:
+        facts = _find(paras[:reasons], FACTS_RE)
+        header_end = reasons if facts is None else facts
+        if facts is None:
+            seg.issues.append("no_facts_heading")
+        else:
+            spans.append(("facts", facts, reasons, None))
+
+    if outcome is None:
+        seg.issues.append("no_dispositiv")
+    if reasons is not None:
+        reason_spans = list(_reason_spans(paras, reasons, body_end))
+        for first, last, number in reason_spans:
+            label = ".".join(map(str, number)) if number is not None else None
+            spans.append(("consideration" if label else "reasons", first, last, label))
+        unnumbered = len(reason_spans) == 1
+        if unnumbered:
+            seg.issues.append("no_numbered_considerations")
+        short_order = any(p.text.lower().startswith(ORDER_CLAUSE) for p in paras[reasons + 1:min(reasons + 6, body_end)])
+        if short_text or outcome is None or (unnumbered and not short_order):
+            seg.status = "partial"
+
+    _header_fields(seg, paras[:header_end])
+    for kind, first, last, label in [("header", 0, header_end, None), *spans,
+                                     ("dispositiv", body_end, len(paras), None)]:
+        if first < last:
+            start, end = paras[first].start, paras[last - 1].end
+            suffix = f"E.{label}" if label else kind
+            seg.passages.append(Passage(f"{key}#{suffix}", kind, label, text[start:end], start, end))
+    return seg

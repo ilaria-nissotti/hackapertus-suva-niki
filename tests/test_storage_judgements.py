@@ -51,11 +51,12 @@ def test_set_html_path(repo):
 
 
 def test_key_matches_example_decision_id():
-    from suva.ingest.exports import decision_id
-    from suva.sources.base import judgement_key
+    from suva.ingest.exports import ExampleSummary
 
-    assert judgement_key("8C_129/2025", date(2025, 11, 11)) == decision_id("8C_129/2025", "2025-11-11")
-    assert judgement_key("8C_129/2025", None) == "8C_129/2025"
+    record = rec()
+    example = ExampleSummary(record.docket, record.decision_date, "", None, "", "", None, None, None, "a.html")
+    assert record.key == example.decision_id == "8C_129/2025@2025-11-11"
+    assert rec(d=None).key == "8C_129/2025"
 
 
 def test_migrations_numbered_uniquely():

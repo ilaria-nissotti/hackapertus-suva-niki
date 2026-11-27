@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from suva.sources.base import DOCKET_RE
+
 # canonical (DE) -> aliases in DE / FR / IT
 LAWS: dict[str, tuple[str, ...]] = {
     "UVG": ("UVG", "LAA", "LAINF"), "UVV": ("UVV", "OLAA", "OAINF"),
@@ -45,7 +47,6 @@ BGE_RE = re.compile(
     r"\b(?P<coll>BGE|ATF|DTF)\s+(?P<vol>\d{1,3})\s+(?P<part>Ia|Ib|II|III|IV|V|VI|I)\s+(?P<page>\d{1,4})\b"
     r"(?:\s*(?:E\.|consid\.|cons\.)\s*(?P<cons>\d+(?:\.\d+)*))?"
 )
-DOCKET_RE = re.compile(r"\b(\d{1,2}[A-Z])_(\d{1,4})/(\d{4})\b")
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,7 @@ def extract(text: str, self_docket: str | None = None) -> list[Citation]:
         canon = f"BGE {m['vol']} {m['part']} {m['page']}"
         out.append(Citation("bge", canon, m.group(0), m.start(), m.end(), consideration=m["cons"]))
     for m in DOCKET_RE.finditer(text):
-        docket = f"{m[1]}_{m[2]}/{m[3]}"
+        docket = m.group()
         if docket != self_docket:
             out.append(Citation("judgement", docket, m.group(0), m.start(), m.end()))
     return sorted(out, key=lambda c: c.start)

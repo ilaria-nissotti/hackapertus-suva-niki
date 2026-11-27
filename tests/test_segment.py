@@ -194,3 +194,9 @@ def test_dispositiv_does_not_overlap_header_without_reasons():
     header, outcome = result.passages
     assert header.end <= outcome.start
     assert outcome.text.startswith("Demnach erkennt")
+
+
+def test_singular_german_reason_heading():
+    result = segment("k", DE.replace("Erwägungen:", "Erwägung:"))
+    assert result.status == "ok"
+    assert "E.2.2" in ids(result)

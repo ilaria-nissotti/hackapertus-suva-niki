@@ -1,10 +1,10 @@
-"""SQLite implementation. FTS5 now; sqlite-vec is added in the KB step."""
+"""SQLite persistence for supplied data, judgements, and parse results."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import nullcontext
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +12,7 @@ from typing import Any
 from suva.config import Settings
 from suva.hashing import sha256
 from suva.sources.quality import usable_text
+from suva.sources.base import decision_id
 from suva.storage.base import AuditEntry, Repository
 from suva.storage.migrations import MIGRATIONS
 
@@ -22,18 +23,26 @@ def utcnow() -> str:
 
 class SQLiteRepository(Repository):
     def __init__(self, path: Path | str):
-        self.path = str(path)
-        if self.path != ":memory:":
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA journal_mode = WAL")
 
+    @contextmanager
+    def _write(self):
+        # Nested writes belong to the outer operation's transaction.
+        if self.conn.in_transaction:
+            yield
+        else:
+            with self.conn:
+                self.conn.execute("BEGIN IMMEDIATE")
+                yield
+
     def migrate(self) -> list[str]:
         applied = []
-        with self.conn:
-            self.conn.execute("BEGIN IMMEDIATE")
+        with self._write():
             self.conn.execute(
                 "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
             )
@@ -56,7 +65,7 @@ class SQLiteRepository(Repository):
         return applied
 
     def append_audit(self, entry: AuditEntry) -> int:
-        with self.conn:
+        with self._write():
             cur = self.conn.execute(
                 "INSERT INTO audit_log (created_at, kind, actor, payload) VALUES (?, ?, ?, ?)",
                 (utcnow(), entry.kind, entry.actor, json.dumps(entry.payload, ensure_ascii=False, sort_keys=True)),
@@ -91,7 +100,7 @@ class SQLiteRepository(Repository):
         values["imported_at"] = utcnow()
         names = list(values)
         updates = ", ".join(f"{c} = excluded.{c}" for c in names if c != key)
-        with nullcontext() if self.conn.in_transaction else self.conn:
+        with self._write():
             self.conn.execute(
                 f"INSERT INTO {table} ({', '.join(names)}) VALUES ({', '.join('?' for _ in names)}) "
                 f"ON CONFLICT({key}) DO UPDATE SET {updates}",
@@ -103,15 +112,11 @@ class SQLiteRepository(Repository):
         return [{**dict(r), "notes": json.loads(r["notes"])} for r in cur.fetchall()]
 
     def upsert_example(self, row: dict[str, Any]) -> None:
-        from suva.ingest.exports import decision_id
-
         identity = decision_id(row["docket"], row.get("decision_date"))
         if row.get("decision_id", identity) != identity:
             raise ValueError("Decision ID does not match the docket and decision date")
         row = {**row, "decision_id": identity}
-        with nullcontext() if self.conn.in_transaction else self.conn:
-            if not self.conn.in_transaction:
-                self.conn.execute("BEGIN IMMEDIATE")
+        with self._write():
             existing = self._rows(self.conn.execute(
                 "SELECT * FROM example_summaries WHERE decision_id = ?", (row["decision_id"],)
             ))
@@ -131,7 +136,7 @@ class SQLiteRepository(Repository):
         return self._rows(self.conn.execute("SELECT * FROM example_summaries ORDER BY docket, decision_id"))
 
     def set_example_split(self, decision_id: str, split: str) -> None:
-        with nullcontext() if self.conn.in_transaction else self.conn:
+        with self._write():
             cur = self.conn.execute(
                 "UPDATE example_summaries SET split = ? WHERE decision_id = ? AND (split IS NULL OR split = ?)",
                 (split, decision_id, split),
@@ -145,8 +150,7 @@ class SQLiteRepository(Repository):
             raise KeyError(decision_id)
 
     def replace_supplied(self, examples: list[dict], positives: list[dict]) -> None:
-        with self.conn:
-            self.conn.execute("BEGIN IMMEDIATE")
+        with self._write():
             ids = {e["decision_id"] for e in examples}
             for row in self.list_examples():
                 if row["decision_id"] not in ids:
@@ -166,8 +170,7 @@ class SQLiteRepository(Repository):
     def freeze_examples(self, manifest: dict) -> dict[str, int]:
         from suva.ingest.split import validate_manifest
 
-        with self.conn:
-            self.conn.execute("BEGIN IMMEDIATE")
+        with self._write():
             examples = self.list_examples()
             validate_manifest(manifest, examples)
             existing = self.get_example_manifest()
@@ -199,8 +202,7 @@ class SQLiteRepository(Repository):
         pub = rec.publication_date.isoformat() if rec.publication_date else None
         prefix = rec.docket.split("_", 1)[0] if "_" in rec.docket else None
         text = usable_text(rec.text)
-        with self.conn:
-            self.conn.execute("BEGIN IMMEDIATE")
+        with self._write():
             row = self.conn.execute(
                 "SELECT text, publication_date, language FROM judgements WHERE key = ?", (rec.key,)
             ).fetchone()
@@ -238,8 +240,7 @@ class SQLiteRepository(Repository):
         return new
 
     def clear_unusable_text(self, key: str) -> bool:
-        with self.conn:
-            self.conn.execute("BEGIN IMMEDIATE")
+        with self._write():
             row = self.conn.execute("SELECT text FROM judgements WHERE key = ?", (key,)).fetchone()
             if row is None or row["text"] is None or usable_text(row["text"]):
                 return False
@@ -273,7 +274,7 @@ class SQLiteRepository(Repository):
             "SELECT * FROM judgement_sources WHERE key = ? ORDER BY source", (key,))]
 
     def set_html_path(self, key: str, path: str) -> None:
-        with self.conn:
+        with self._write():
             self.conn.execute("UPDATE judgements SET html_path = ?, updated_at = ? WHERE key = ?",
                               (path, utcnow(), key))
 
@@ -285,8 +286,7 @@ class SQLiteRepository(Repository):
 
     def save_parse(self, seg, citations, text_hash) -> bool:
         n_cit = sum(len(v) for v in citations.values())
-        with self.conn:
-            self.conn.execute("BEGIN IMMEDIATE")
+        with self._write():
             row = self.conn.execute("SELECT text FROM judgements WHERE key = ?", (seg.key,)).fetchone()
             if row is None or (sha256(row["text"]) if row["text"] else None) != text_hash:
                 return False
@@ -320,17 +320,6 @@ class SQLiteRepository(Repository):
         return [dict(r) for r in self.conn.execute(
             "SELECT c.* FROM citations c JOIN passages p ON p.pid = c.pid WHERE p.key = ?"
             " ORDER BY p.ord, c.start", (key,))]
-
-    def parse_summary(self) -> dict[str, Any]:
-        status = dict(self.conn.execute("SELECT status, count(*) FROM parses GROUP BY status").fetchall())
-        issues: dict[str, int] = {}
-        for (raw,) in self.conn.execute("SELECT issues FROM parses"):
-            for i in json.loads(raw):
-                issues[i] = issues.get(i, 0) + 1
-        unparsed = self.conn.execute(
-            "SELECT count(*) FROM judgements j LEFT JOIN parses p ON p.key = j.key WHERE p.key IS NULL"
-        ).fetchone()[0]
-        return {"status": status, "issues": issues, "unparsed": unparsed}
 
     def close(self) -> None:
         self.conn.close()

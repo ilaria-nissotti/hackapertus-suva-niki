@@ -1,28 +1,36 @@
-"""entscheidsuche.ch: independent second listing of BGer decisions + HTML on demand.
-
-robots.txt allows everything except /hidden and /archiv. We list via its search
-API (metadata only, week by week) and fetch a decision's HTML only when needed,
-through the PoliteClient (1 request / 2 s). Measured 2026-11-27: complete for the
-dev window and all 82 Suva picks, but it lags OpenCaseLaw in the most recent weeks.
-"""
+"""List BGer decisions and cache validated HTML from entscheidsuche."""
 
 from __future__ import annotations
 
 import re
-from tempfile import NamedTemporaryFile
+from dataclasses import dataclass
 from datetime import date, timedelta
+from itertools import islice
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Iterator
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
 from suva.http import PoliteClient
 from suva.sources.base import SourceRecord, parse_iso_date
+from suva.sources.quality import JUDGEMENT_MARKERS, html_to_text, usable_text
 
 SOURCE = "entscheidsuche"
 SEARCH_URL = "https://entscheidsuche.ch/_search.php"
 PAGE_SIZE = 1000
 SAFE_ID = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+
+class SourceResponseError(RuntimeError):
+    """The listing did not contain the requested result set."""
+
+
+@dataclass(frozen=True)
+class JudgementDocument:
+    path: Path
+    text: str
 
 
 def _query(start: date, end: date, size: int) -> dict:
@@ -41,12 +49,18 @@ def _query(start: date, end: date, size: int) -> dict:
 def _records(hit: dict) -> Iterator[SourceRecord]:
     src = hit.get("_source", {})
     title = src.get("title") or {}
-    for ref in src.get("reference") or []:
+    references = src.get("reference")
+    decision_date = parse_iso_date(src.get("date"))
+    if not isinstance(references, list) or not references or not decision_date:
+        raise ValueError("Missing docket references or decision date")
+    for ref in references:
+        if not isinstance(ref, str) or not ref.strip():
+            raise ValueError("Invalid docket reference")
         yield SourceRecord(
             source=SOURCE,
             source_id=hit["_id"],
             docket=ref.strip(),
-            decision_date=parse_iso_date(src.get("date")),
+            decision_date=decision_date,
             language=src.get("language"),
             chamber_raw=title.get("de"),
             html_url=(src.get("attachment") or {}).get("content_url"),
@@ -54,46 +68,60 @@ def _records(hit: dict) -> Iterator[SourceRecord]:
 
 
 def _list_range(client: PoliteClient, start: date, end: date, size: int) -> Iterator[SourceRecord]:
-    data = client.post_json(SEARCH_URL, _query(start, end, size))
-    if "error" in data:
-        raise RuntimeError(f"entscheidsuche search error: {str(data['error'])[:300]}")
-    total = data["hits"]["total"]["value"]
-    if total > size:
+    try:
+        data = client.post_json(SEARCH_URL, _query(start, end, size))
+        if data.get("error"):
+            raise SourceResponseError(f"entscheidsuche search error: {str(data['error'])[:300]}")
+        results = data["hits"]
+        total = results["total"]["value"]
+        hits = results["hits"]
+        if not isinstance(total, int) or total < 0 or not isinstance(hits, list):
+            raise ValueError("Unexpected search result fields")
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise SourceResponseError(f"Invalid listing for {start} through {end}") from exc
+    if total > size or results["total"].get("relation") == "gte":
         if start == end:
-            raise RuntimeError(f"{total} decisions on {start}: more than one page ({size})")
+            raise SourceResponseError(f"Listing for {start} exceeds one page ({size})")
         mid = start + (end - start) // 2
         yield from _list_range(client, start, mid, size)
         yield from _list_range(client, mid + timedelta(days=1), end, size)
         return
-    for hit in data["hits"]["hits"]:
-        yield from _records(hit)
+    if len(hits) != total:
+        raise SourceResponseError(f"Incomplete listing for {start} through {end}")
+    try:
+        for hit in hits:
+            yield from _records(hit)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise SourceResponseError(f"Invalid decision in listing for {start} through {end}") from exc
+
+
+def week_ranges(start: date, end: date) -> Iterator[tuple[date, date]]:
+    while start <= end:
+        stop = min(start + timedelta(days=6), end)
+        yield start, stop
+        start = stop + timedelta(days=1)
 
 
 def list_bger(client: PoliteClient, start: date, end: date, size: int = PAGE_SIZE) -> Iterator[SourceRecord]:
-    """All BGer decisions with start <= decision date <= end, queried one week at a time."""
-    cur = start
-    while cur <= end:
-        stop = min(cur + timedelta(days=6), end)
-        yield from _list_range(client, cur, stop, size)
-        cur = stop + timedelta(days=1)
+    for first, last in week_ranges(start, end):
+        yield from _list_range(client, first, last, size)
 
 
-def fetch_html(client: PoliteClient, rec: SourceRecord, cache_dir: Path) -> str:
-    """Decision HTML, cached under cache_dir/<source_id>.html (fetched at most once)."""
-    if not rec.html_url:
-        raise ValueError(f"{rec.docket}: no HTML url")
-    if not SAFE_ID.match(rec.source_id):
-        raise ValueError(f"unsafe source id {rec.source_id!r}")
+def load_judgement(client: PoliteClient, rec: SourceRecord, cache_dir: Path) -> JudgementDocument:
+    """Load the text and local HTML path, refreshing a missing or invalid cache entry."""
+    url = urlsplit(rec.html_url or "")
+    if (url.scheme, url.netloc) != ("https", "entscheidsuche.ch"):
+        raise ValueError(f"{rec.docket}: expected an HTTPS entscheidsuche attachment URL")
+    if not SAFE_ID.fullmatch(rec.source_id):
+        raise ValueError(f"Unsafe source ID: {rec.source_id!r}")
     path = cache_dir / f"{rec.source_id}.html"
-    if path.exists():
-        try:
-            html = path.read_text(encoding="utf-8")
-            _validate_html(html, rec)
-            return html
-        except (UnicodeError, ValueError):
-            pass
-    html = client.get(rec.html_url).text
-    _validate_html(html, rec)
+    try:
+        return JudgementDocument(path, _judgement_text(path.read_text(encoding="utf-8"), rec))
+    except (FileNotFoundError, ValueError):
+        pass
+
+    html = client.get(rec.html_url, follow_redirects=False).text
+    text = _judgement_text(html, rec)
     cache_dir.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(mode="w", encoding="utf-8", dir=cache_dir, delete=False) as output:
         temporary = Path(output.name)
@@ -103,15 +131,15 @@ def fetch_html(client: PoliteClient, rec: SourceRecord, cache_dir: Path) -> str:
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
-    return html
+    return JudgementDocument(path, text)
 
 
-def _validate_html(html: str, rec: SourceRecord) -> None:
+def _judgement_text(html: str, rec: SourceRecord) -> str:
     soup = BeautifulSoup(html, "lxml")
-    content = " ".join(p.get_text(" ", strip=True) for p in soup.select("div.para"))
-    docket = re.sub(r"[^a-z0-9]", "", rec.docket.lower())
-    header = re.sub(r"[^a-z0-9]", "", soup.get_text(" ", strip=True).lower())
-    if not content.strip() or not docket or docket not in header or not re.search(
-        r"Erwägung|Considérant|Considérants|Diritto|Considerando", content, re.IGNORECASE
-    ):
+    text = usable_text(html_to_text(soup))
+    docket = re.escape(rec.docket).replace("_", r"[_\s]+")
+    header = " ".join(islice(soup.stripped_strings, 30))
+    if (not text or not JUDGEMENT_MARKERS.search(text)
+            or not re.search(rf"(?<!\w){docket}(?!\w)", header, re.I)):
         raise ValueError(f"{rec.docket}: response lacks expected judgement content")
+    return text

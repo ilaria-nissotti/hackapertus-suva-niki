@@ -36,14 +36,6 @@ def test_reparse_replaces(repo):
     assert len(repo.list_passages(KEY)) == len(segment(KEY, TEXT).passages)
 
 
-def test_summary(repo):
-    store(repo)
-    repo.upsert_judgement(SourceRecord(source="opencaselaw", source_id="2", docket="8C_2/2025",
-                                       decision_date=date(2025, 10, 3), text=None))
-    s = repo.parse_summary()
-    assert s["status"] == {"ok": 1} and s["unparsed"] == 1
-
-
 def test_source_update_invalidates_parse_and_rejects_stale_save(repo):
     seg = store(repo)
     repo.upsert_judgement(SourceRecord(

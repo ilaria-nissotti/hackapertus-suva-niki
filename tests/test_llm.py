@@ -43,6 +43,7 @@ def test_readonly_mode_never_calls_network(tmp_path, repo):
     with pytest.raises(CacheMiss):
         ro.chat(MSG, prompt_version="t/other")
     assert ro_calls.calls == []
+    assert repo.list_audit(kind="llm_call")[0]["payload"]["error"] == "cache_miss_readonly"
 
 
 def test_off_mode_skips_cache(tmp_path, repo):

@@ -35,3 +35,16 @@ def test_latest_run_distinguishes_empty_from_unqueried(repo):
     }))
     week, = coverage_by_week(repo, "2025-10-06", "2025-10-12")
     assert week == {"week": "2025-10-06", "queries": {"opencaselaw": "queried", "entscheidsuche": "unqueried"}}
+
+
+def test_publication_coverage_keeps_late_and_unknown_publications_separate():
+    from suva.coverage import publication_coverage
+
+    totals = publication_coverage({"sightings": {
+        "late": {"decision_date": "2025-01-01", "publication_date": "2025-10-08",
+                 "sources": ["opencaselaw"], "has_text": True},
+        "unknown": {"decision_date": "2025-10-06", "publication_date": None,
+                    "sources": ["entscheidsuche"], "has_text": False},
+    }})
+    assert totals["known_publication_date"]["total"] == 1
+    assert totals["unknown_publication_date"]["no_text"] == 1

@@ -104,8 +104,4 @@ class Repository(ABC):
     def list_citations(self, key: str) -> list[dict[str, Any]]: ...
 
     @abstractmethod
-    def parse_summary(self) -> dict[str, Any]:
-        """Counts by status and by issue over all parsed judgements."""
-
-    @abstractmethod
     def close(self) -> None: ...

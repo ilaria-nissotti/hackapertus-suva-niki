@@ -1,11 +1,4 @@
-"""Is a source's "full text" really a judgement?
-
-Measured 2026-11-27: 27 OpenCaseLaw rows (12 of them 8C, all Sep-Nov 2026)
-hold the bger.ch "Dokument nicht gefunden" page instead of the decision.
-Such text must never count as the judgement: it would make relevant decisions
-look empty (false negatives). It is treated as "no text", and fetch falls back
-to entscheidsuche's HTML.
-"""
+"""Recognize source error pages and extract paragraph text from judgement HTML."""
 
 from __future__ import annotations
 
@@ -21,8 +14,8 @@ ERROR_MARKERS = re.compile(
 )
 PORTAL_CHROME = re.compile(r"Liste der Neuheiten|Expertensuche für Abonnenten|Eurospider Information Technology", re.I)
 JUDGEMENT_MARKERS = re.compile(
-    r"^\s*(?:Erwägungen?\s*:|Considérant en droit|Considerando in diritto|Diritto\s*:|"
-    r"Demnach erkennt|Par ces motifs|Per questi motivi)", re.I | re.M
+    r"^\s*(?:Erwägungen?\s*:|in Erwägung\s*[:,]|Considérant|Considerando|Diritto\s*:|"
+    r"ritiene\s*:|Demnach (?:erkennt|verfügt)|Par ces motifs|Per questi motivi)", re.I | re.M
 )
 
 
@@ -39,13 +32,9 @@ def usable_text(text: str | None) -> str | None:
     return None if not text or not text.strip() or is_error_page(text) else text
 
 
-def html_to_text(html: str) -> str:
-    """entscheidsuche/bger HTML -> plain text with one paragraph per div.para.
-
-    Same shape as OpenCaseLaw text (blank line between paragraphs), so the
-    step-4 splitter treats both sources identically.
-    """
-    soup = BeautifulSoup(html, "lxml")
+def html_to_text(html: str | BeautifulSoup) -> str:
+    """Keep one paragraph per div.para so the parser can find section boundaries."""
+    soup = BeautifulSoup(html, "lxml") if isinstance(html, str) else html
     paras = [p.get_text(" ", strip=True) for p in soup.select("div.para")]
     if not any(paras):
         body = soup.body or soup

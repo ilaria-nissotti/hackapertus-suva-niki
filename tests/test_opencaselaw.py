@@ -54,3 +54,54 @@ def test_same_docket_two_decisions_kept(tmp_path):
 def test_without_text(tmp_path):
     p = write(tmp_path, [row("8C_1/2025", "2025-10-01")])
     assert list(read_bger(p, with_text=False))[0].text is None
+
+
+def test_duplicate_keeps_publication_date_from_other_row(tmp_path):
+    path = write(tmp_path, [
+        row("8C_1/2025", "2025-10-01", text=None, publication_date="2025-10-07"),
+        row("8C_1/2025", "2025-10-01", text="Complete text"),
+    ])
+    decision, = read_bger(path)
+    assert decision.text == "Complete text" and decision.publication_date == date(2025, 10, 7)
+
+
+def test_invalid_download_keeps_last_snapshot(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    import httpx
+    import pytest
+    from pyarrow import ArrowInvalid
+
+    from suva.sources.opencaselaw import download_bger
+
+    @contextmanager
+    def stream(*args, **kwargs):
+        yield httpx.Response(200, content=b"<html>Upstream error</html>", request=httpx.Request("GET", "https://example.test"))
+
+    path = write(tmp_path, [row("8C_1/2025", "2025-10-01")])
+    snapshot = path.read_bytes()
+    monkeypatch.setattr(httpx, "stream", stream)
+    with pytest.raises(ArrowInvalid):
+        download_bger(path, refresh=True)
+    assert path.read_bytes() == snapshot
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_download_publishes_valid_snapshot(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    import httpx
+
+    from suva.sources.opencaselaw import download_bger
+
+    source = write(tmp_path, [row("8C_1/2025", "2025-10-01")])
+
+    @contextmanager
+    def stream(*args, **kwargs):
+        yield httpx.Response(200, content=source.read_bytes(), request=httpx.Request("GET", "https://example.test"))
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    destination = tmp_path / "cache" / "bger.parquet"
+    assert download_bger(destination) == destination
+    assert [record.docket for record in read_bger(destination)] == ["8C_1/2025"]
+    assert list(destination.parent.iterdir()) == [destination]

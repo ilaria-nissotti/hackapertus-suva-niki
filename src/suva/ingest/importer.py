@@ -6,8 +6,9 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from suva.ingest.exports import decision_id, parse_export_dir, _title_date
+from suva.ingest.exports import parse_export_dir, title_date
 from suva.ingest.picks import read_picks
+from suva.sources.base import decision_id
 from suva.storage.base import Repository
 
 
@@ -63,7 +64,7 @@ def import_supplied(repo: Repository, judgements_dir: Path) -> ImportReport:
         court = pick.court
         notes = list(pick.notes)
         candidates = by_docket.get(pick.docket, set())
-        dated_ref = decision_id(pick.docket, _title_date(pick.raw)) if pick.docket else None
+        dated_ref = decision_id(pick.docket, title_date(pick.raw)) if pick.docket else None
         if dated_ref in candidates:
             ref = dated_ref
         elif len(candidates) == 1 and (dated_ref == pick.docket or pick.docket in candidates):

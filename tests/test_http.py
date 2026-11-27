@@ -56,3 +56,40 @@ def test_404_raises():
     c, _ = client(lambda r: httpx.Response(404))
     with pytest.raises(httpx.HTTPStatusError):
         c.get("https://a.test/")
+
+
+def test_redirect_hops_are_paced():
+    requests = []
+
+    def handler(req):
+        requests.append(req.url.path)
+        if req.url.path == "/first":
+            return httpx.Response(302, headers={"Location": "/second"})
+        return httpx.Response(200)
+
+    http, time = client(handler)
+    assert http.get("https://a.test/first").status_code == 200
+    assert requests == ["/first", "/second"]
+    assert time.sleeps == [2.0]
+
+
+def test_transport_failure_retries_only_up_to_limit():
+    attempts = []
+
+    def handler(request):
+        attempts.append(request)
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    http, time = client(handler, retries=2)
+    with pytest.raises(httpx.ReadTimeout):
+        http.get("https://a.test")
+    assert len(attempts) == 3
+    assert time.sleeps == [2, 4]
+
+
+@pytest.mark.parametrize("value, minimum", [("12", 12), ("Thu, 01 Jan 2099 00:00:00 GMT", 2), ("invalid", 2)])
+def test_retry_after_keeps_minimum_backoff(value, minimum):
+    responses = iter([httpx.Response(429, headers={"Retry-After": value}), httpx.Response(200)])
+    http, time = client(lambda _: next(responses))
+    assert http.get("https://a.test").status_code == 200
+    assert time.sleeps[0] >= minimum

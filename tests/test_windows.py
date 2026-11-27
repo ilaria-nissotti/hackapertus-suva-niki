@@ -18,3 +18,12 @@ def test_challenge_window_widened():
 def test_dev_window_is_xlsx_period():
     w = dev_window()
     assert (w.start, w.end) == (date(2025, 10, 1), date(2026, 3, 31))
+
+
+def test_reversed_custom_window_fails():
+    import pytest
+
+    from suva.windows import Window
+
+    with pytest.raises(ValueError, match="start must be on or before"):
+        Window("custom", date(2026, 3, 1), date(2026, 2, 1))

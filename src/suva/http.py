@@ -1,12 +1,4 @@
-"""Polite HTTP client used by every source adapter.
-
-Red lines from solution_planning.md §10, enforced here:
-- an honest User-Agent naming this project (never a faked browser);
-- at least MIN_INTERVAL seconds between requests to the same host
-  (search.bger.ch / entscheidsuche ask for Crawl-delay: 2);
-- one request at a time; retry with backoff on 429/5xx/timeouts only;
-- a block (403) is reported, never worked around.
-"""
+"""HTTP pacing and retries for the listing and attachment API."""
 
 from __future__ import annotations
 
@@ -14,8 +6,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from itertools import count
 from typing import Any, Callable
-from urllib.parse import urlparse
 
 import httpx
 
@@ -41,10 +33,11 @@ class PoliteClient:
         self._last: dict[str, float] = {}
         self._client = httpx.Client(
             headers={"User-Agent": USER_AGENT}, timeout=self.timeout,
-            transport=self.transport, follow_redirects=True,
+            transport=self.transport, follow_redirects=True, event_hooks={"request": [self._pace_request]},
         )
 
-    def _wait_turn(self, host: str) -> None:
+    def _pace_request(self, request: httpx.Request) -> None:
+        host = request.url.host
         last = self._last.get(host)
         if last is not None:
             wait = self.min_interval - (self.clock() - last)
@@ -53,18 +46,16 @@ class PoliteClient:
         self._last[host] = self.clock()
 
     def request(self, method: str, url: str, **kw: Any) -> httpx.Response:
-        host = urlparse(url).netloc
-        for attempt in range(self.retries + 1):
-            self._wait_turn(host)
+        for attempt in count():
             try:
                 resp = self._client.request(method, url, **kw)
-            except (httpx.TimeoutException, httpx.TransportError):
-                if attempt == self.retries:
+            except httpx.TransportError:
+                if attempt >= self.retries:
                     raise
                 self.sleep(self.min_interval * 2 ** attempt)
                 continue
             if resp.status_code == 403:
-                raise Blocked(f"403 from {host} for {url}")
+                raise Blocked(f"403 from {resp.request.url.host}")
             if resp.status_code in RETRY_STATUS and attempt < self.retries:
                 retry_after = resp.headers.get("Retry-After", "")
                 delay = self.min_interval * 2 ** attempt
@@ -81,7 +72,6 @@ class PoliteClient:
                 continue
             resp.raise_for_status()
             return resp
-        raise AssertionError("unreachable")
 
     def get(self, url: str, **kw: Any) -> httpx.Response:
         return self.request("GET", url, **kw)
