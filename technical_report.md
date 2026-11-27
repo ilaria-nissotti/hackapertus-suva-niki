@@ -11,17 +11,33 @@ numbers say.
 
 ## 1. Summary
 
-The prototype helps a Suva reviewer prioritize Swiss Federal Supreme Court
-judgments and draft independent German and French summaries. It retains the
-original judgment and shows the evidence behind each high score.
+The prototype collects Swiss Federal Supreme Court judgments published in the
+last three months and scores each one for relevance to Suva with deterministic,
+expert-editable rules. Every score comes with the rules that fired, so a reviewer
+sees why a judgment was selected or not. For the shortlisted judgments, Apertus
+drafts independent German and French summaries in Suva's style, which a reviewer
+edits and approves in a local web workspace. Approved summaries can be narrated
+(ElevenLabs), and reviewers can ask questions about a judgment with answers
+citing the original lines.
 
 ## 2. Architecture
 
-The React and TypeScript workspace is built with Vite and served by Flask. The browser reads a same-origin dashboard API and refreshes active jobs in place. Flask and SQLite run locally. Node.js is needed at build time. A resumable Python
-collector downloads records and full text from OpenCaseLaw and preserves the
-publication date separately from the ruling date. JSONL import supports later
-datasets. Apertus tasks run server-side, and the browser sees only the saved
-case data and results.
+One data pipeline feeds one review workspace:
+
+1. **Collect** (`python -m suva fetch --window challenge`): the OpenCaseLaw
+   Parquet snapshot plus entscheidsuche listings and HTML, keyed by
+   `docket@decision-date`. Publication, decision and retrieval dates stay
+   separate, and a coverage ledger records which source listed each decision.
+2. **Parse** (`suva parse`): verbatim passages (header, regeste, facts,
+   considerations, ruling) and citations (statutes, BGE, dockets) with offsets.
+3. **Score** (`suva score`): `rules/rules.yaml` turns fired rules into a 0–100
+   score, a band (high / check / low) and an explanation. No language model is
+   involved, so the same judgment and rules always give the same score.
+4. **Review** (`src/app.py serve`): a Flask app serves the React/TypeScript
+   build (Vite; Node.js only at build time). It reads judgments and scores from
+   the knowledge base (`data/kb.sqlite`) and keeps drafts, approvals and audio
+   in its own `data/review.sqlite`. Apertus tasks run server-side; the browser
+   sees only saved case data and results.
 
 ### Target architecture (mandatory)
 
@@ -37,14 +53,16 @@ List any external dependencies, and separate build time from runtime.
 ## 3. Use of Apertus
 
 - **Model:** Apertus v1.5 8B (`apertus-v1-5-8b`).
-- **Use:** inference for triage, evidence verification, factual briefs and drafts.
+- **Use:** inference for factual briefs, DE/FR drafts, briefing scripts and case
+  questions. The relevance score itself is deterministic; an optional Apertus
+  judge (`suva judge`) can rate candidates for evaluation.
 - **Endpoint:** Keera Gateway, configured using the repo's `LLM_*` variables.
 
-The score uses ordinal anchors 0, 20, 45, 70 and 95. The model selects numbered
-lines and the application resolves them directly from the source. High scores
-require an accident-insurance signal and a second inference check. Each summary
-uses the source, a shared factual brief and up to three same-language examples.
-Reviewer-approved edits can become examples in subsequent requests.
+Each summary uses the source, a shared factual brief and up to three
+same-language Suva examples from the few-shot split (the evaluation split is
+never shown to the model). The model selects numbered lines and the application
+resolves them directly from the source. Reviewer-approved edits can become
+examples in subsequent requests.
 
 ## 4. Data
 
@@ -55,27 +73,28 @@ how consent was obtained.
 
 ## 5. Limitations
 
-Mirror publication dates do not establish complete Q2 coverage. A source line
-can be authentic while the model's interpretation is wrong. The evidence gate
-can send relevant judgments to Review, particularly when the selected lines do
-not contain a recognized term. The Excel labels positive examples and cannot by
-itself establish false-positive rates. Drafts require legal review.
+Mirror publication dates do not establish complete coverage of the window, and
+some decisions have no known publication date (they are included and counted).
+The rules find the right topic but not always the significant judgments: many
+accident-insurance cases with Suva as a party are not in Suva's selection. The
+Excel labels positive examples and cannot by itself establish false-positive
+rates. A source line can be authentic while the model's interpretation is wrong.
+Drafts require legal review.
 
 ## 6. Reproducibility
 
-Use the README commands for setup, sync, scoring and local launch.
-`src/evaluate.py` separates Q4 development positives from Q1 holdout positives,
-uses fixed negative cases, and reports our results and failed tasks as JSON.
-The small `--positive-limit` run checks the pipeline and is not a population
-estimate. Inference results and approvals are stored locally in SQLite.
+Use the README commands for setup, fetch, parse, scoring and local launch.
+`python -m suva dataset` labels the dev window (2025-10-01 to 2026-03-31) from
+Suva's spreadsheet and holds back March 2026 as the test split (dockets stay in
+one split). `python -m suva evaluate` reports ranking metrics on the training
+split; `evaluate --split test` gives the final number. On the training split the
+current rules reach top-10 precision 70%, average precision 0.52, AUC 0.991, and
+100% recall at the threshold (181 flagged, 47 relevant).
 
-The first full historical benchmark selected a shortlist cutoff of 45 on
-Q4 development cases. It recovered 23 of 31 Q1 holdout positives (74.2% recall,
-F2 0.782 on this sample), and neither of the two held-out negatives was
-shortlisted. The two failed holdout requests count as missed positives.
-Two workbook rows without a directly parsable federal docket were excluded.
-The two negatives are regression examples from earlier prompt experiments.
-This small sample cannot estimate production precision.
+*Earlier experiment (replaced):* an Apertus ordinal triage (0/20/45/70/95 with
+verified evidence quotes) recovered 23 of 31 Q1 holdout positives (74.2% recall,
+F2 0.782) at a cutoff of 45. That sample was small and the triage cost one or
+two model calls per judgment, so the product now uses the deterministic rules.
 
 ### Running it
 

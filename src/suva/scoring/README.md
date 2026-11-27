@@ -47,6 +47,7 @@ Run from the repo root with the venv active. Outputs go to `data/scoring/`.
 | `python -m suva analyze` | Lists words, laws, BGE citations etc. that are much more common in relevant judgements → **rule ideas**. |
 | `python -m suva evaluate` | Scores the training set: top-10 precision, how far down the list all relevant ones are, misses, false alarms. |
 | `python -m suva fit-weights` | Suggests rule weights from the data → `rules/rules.fitted.yaml` (copy what you agree with). |
+| `python -m suva score` | Scores every judgement of the challenge window (last 3 months; `--window dev` for the dev window) and stores score, band and fired rules for the review app. |
 | `python -m suva judge --limit 30` | Optional: Apertus rates the top candidates and gives a written reason. |
 | `python -m suva evaluate --with-judge` | Scores with the judge's points added. |
 | `python -m suva evaluate --split test` | **Only at the end:** the honest result on unseen judgements. |
@@ -72,6 +73,7 @@ Don't tune on the test set, or its numbers stop meaning anything.
 | `score.py` | Turns fired rules into points, score, band, explanation (no LLM) |
 | `evaluate.py` | Ranking metrics, calibration, misses, false alarms |
 | `fit.py` | Logistic regression that suggests weights |
+| `store.py` | Stores the scores in the KB and checks whether a stored score is still current |
 | `judge.py` | Optional Apertus judge (cached, rubric in `rules.yaml`) |
 
 ## Good to know

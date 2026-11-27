@@ -76,48 +76,49 @@ The submission must:
 
 ## Getting started
 
-The local judgment-review app uses React, TypeScript, Vite, Flask, SQLite, and Apertus via Keera. Building the frontend requires Node.js 20.19+ or 22.12+ on a supported release line. Flask serves the build on the same origin.
-Set `LLM_BASE_URL=https://gateway.keera.ch/api/v1`,
-`LLM_NAME=apertus-v1-5-8b` and your `LLM_API_KEY` in the ignored `.env` file
-at the repo root.
+The pipeline collects judgments into a local knowledge base, parses them and
+scores each one with expert-editable rules. A local review app (React,
+TypeScript, Vite, Flask) shows the ranked queue with the reasons for each score
+and drafts German and French summaries with Apertus via Keera. Building the
+frontend requires Node.js 20.19+ or 22.12+. Set `LLM_BASE_URL`, `LLM_NAME` and
+`LLM_API_KEY` in the ignored `.env` file at the repo root (see `.env.example`).
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -e . pytest
+.venv/bin/python -m suva init-db
+.venv/bin/python -m suva import-supplied            # Suva's summaries and picks
+.venv/bin/python -m suva split-examples --manifest data/split-manifest.json
+.venv/bin/python -m suva fetch --window challenge   # judgments published in the last 3 months
+.venv/bin/python -m suva parse
+.venv/bin/python -m suva score                      # rules score + explanation per judgment
 npm --prefix src/frontend ci
 npm --prefix src/frontend run build
-.venv/bin/python src/bger.py check-apertus
-.venv/bin/python src/app.py sync
 .venv/bin/python src/app.py serve
 ```
 
-Rebuild the frontend after changing its source. Open [the local review dashboard](http://127.0.0.1:5050). You can score and
-summarize individual judgments there. For offline or replacement data,
-run `.venv/bin/python src/app.py import judgments.jsonl`. Each line needs
-`docket_number` (or `docket`) and `full_text`; optional metadata includes
-`title`, `source_url`, `decision_date`, `publication_date` and `date_source`.
-The database lives in ignored `.suva-work/`. Sync resumes at missing cases.
+Open [the local review dashboard](http://127.0.0.1:5050). The queue lists the
+judgments of the window, sorted by score, each with the rules that fired
+("why it was selected" and "what counts against it"). Edit `rules/rules.yaml` and
+run `suva score` again to change the ranking; the app flags scores that are out
+of date. `--today YYYY-MM-DD` (on `fetch`, `score` and `app.py`) pins the window.
 
 ```sh
-.venv/bin/python src/evaluate.py --positive-limit 3
-.venv/bin/python src/app.py score
-.venv/bin/python src/app.py summarize-june
+.venv/bin/python src/app.py summarize-top --limit 10   # DE/FR drafts for the 10 best-scored
 ```
 
-Run evaluation without the limit for the full historical benchmark. Run batch
-jobs one at a time. Successful results are reused by source text, model and
-prompt version. Failed items can be rerun. The score is an ordinal ranking
-mapped to fixed points on a 0–100 scale. High scores require evidence from the
-judgment and an independent model check. The benchmark selected 45 as the
-shortlist threshold to retain Review cases. A score of 70 or above is needed
-for the Relevant label. The two summary calls each use their
-own language examples and a shared factual brief. Approved edits can be used
-as style examples for future drafts.
+Drafts use the judgment, a shared factual brief, and same-language Suva
+examples from the few-shot split. Successful results are reused by source text,
+model and prompt version, and failed items can be rerun. Approved edits become
+style examples for future drafts. To add a judgment outside the window, use
+**Add judgment** with its case ID (it must be in the knowledge base) or upload
+its text. `src/suva/scoring/README.md` explains how to measure and improve the
+rules (`suva dataset`, `analyze`, `evaluate`, `fit-weights`).
 
-The mirror's observed dates are shown in the UI. They reflect the imported
-dataset's coverage; the April–June challenge window may contain more cases.
-The app binds to loopback and sends the selected judgment to your configured
-inference endpoint when triage or summaries are requested.
+The observed publication dates are shown in the UI. They reflect the sources'
+coverage; the window may contain more cases. The app binds to loopback and
+sends a judgment to your configured inference endpoint only when you request
+summaries, a briefing or an answer.
 
 ### Audio briefings
 
@@ -128,10 +129,11 @@ then select **Generate briefing**. Apertus writes a short script and
 ElevenLabs receives only that script for narration. Listen in the
 dashboard or open the transcript and supporting passage.
 
-For the demo, approve both summaries for `8C_354/2026`, then pre-generate:
+For the demo, approve both summaries for a case, then pre-generate audio with
+its key (docket@decision date, shown in the dashboard URL):
 
 ```sh
-.venv/bin/python src/app.py briefing --case 8C_354/2026 --lang both
+.venv/bin/python src/app.py briefing --case "8C_92/2026@2026-10-13" --lang both
 ```
 
 Replaying cached audio does not call either provider. Editing the approved
@@ -157,7 +159,7 @@ app does not save microphone recordings. For the demo use public judgments
 and avoid including nonpublic information in questions.
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pytest -q
 node --test tests/conversation-ui.test.cjs
 ```
 
