@@ -60,6 +60,34 @@ def cmd_split_examples(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fetch(args: argparse.Namespace) -> int:
+    """Download judgements for a window (+ Suva's picks) from OpenCaseLaw and entscheidsuche."""
+    from datetime import date
+
+    from suva.fetch import fetch
+    from suva.windows import Window, challenge_window, dev_window
+
+    settings = load_settings()
+    if args.start and args.end:
+        window = Window("custom", date.fromisoformat(args.start), date.fromisoformat(args.end))
+    elif args.window == "challenge":
+        window = challenge_window(date.fromisoformat(args.today) if args.today else date.today())
+    else:
+        window = dev_window()
+    print(window, f"(published from {window.published_from})" if window.published_from else "")
+    repo = open_repository(settings)
+    try:
+        rep = fetch(
+            repo, settings.data_dir / "raw", window,
+            use_entscheidsuche=not args.no_entscheidsuche, include_picks=not args.no_picks,
+            html_for_picks=not args.no_html, refresh_opencaselaw=args.refresh_opencaselaw,
+        )
+    finally:
+        repo.close()
+    print(json.dumps(rep.as_dict(), indent=2, ensure_ascii=False))
+    return 1 if rep.picks_missing or rep.errors else 0
+
+
 def cmd_llm_ping(args: argparse.Namespace) -> int:
     """Check the gateway: one tiny uncached call, print model, latency, tokens."""
     from suva.llm import LLMClient
@@ -97,6 +125,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--n-eval", type=int, default=15, help="number of docket groups to reserve")
     p.add_argument("--manifest", type=Path, help="write or replay a split manifest JSON file")
     p.set_defaults(func=cmd_split_examples)
+
+    p = sub.add_parser("fetch", help="download judgements for the dev or challenge window (+ Suva picks)")
+    p.add_argument("--window", choices=["dev", "challenge"], default="dev")
+    p.add_argument("--today", help="reference date for the challenge window (YYYY-MM-DD, default: today)")
+    p.add_argument("--start", help="custom window start (YYYY-MM-DD, with --end)")
+    p.add_argument("--end", help="custom window end (YYYY-MM-DD)")
+    p.add_argument("--no-entscheidsuche", action="store_true", help="OpenCaseLaw only (offline after download)")
+    p.add_argument("--no-picks", action="store_true", help="skip Suva's picked judgements")
+    p.add_argument("--no-html", action="store_true", help="skip HTML download for the picks")
+    p.add_argument("--refresh-opencaselaw", action="store_true", help="re-download the parquet (~925 MB)")
+    p.set_defaults(func=cmd_fetch)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")
     p.add_argument("--prompt", default="Antworte mit genau einem Wort: Bereit?")
