@@ -20,6 +20,9 @@ MAX_QUESTION = 1000
 MAX_ANSWER = 1800
 MAX_HISTORY = 6
 SCORE_QUESTION = re.compile(r"\b(?:score|bewertung|punktzahl|einstufung|classement|note)\b|/100", re.I)
+# A number right after an article, paragraph or consideration marker ("Art. 6", "E. 6") is a legal reference.
+LEGAL_REFERENCE = re.compile(r"(?:§|\b(?:art|abs|al|ziff|lit|let|e|consid|bge|atf|dtf|sr|rs|nr|no)\b\.?)"
+                             r"\s*(?:\d+\w*\s*(?:,|und|et|bis|-)\s*)*$", re.I)
 
 
 def bounded(value, maximum):
@@ -88,7 +91,8 @@ def app_score(record):
 def discuss(config, record, lang, question, history, rating):
     source = evidence_lines(record["full_text"])
     score_question = bool(rating and SCORE_QUESTION.search(question))
-    if rating and re.search(rf"\b{rating['score']}\b", question):
+    if rating and any(not LEGAL_REFERENCE.search(question[:m.start()])
+                      for m in re.finditer(rf"\b{rating['score']}\b", question)):
         score_question = True
     result = ask(config, f"""Answer in {LANGUAGES[lang]} using the current court ruling.
 Return exactly {{"kind":"court","answer":"…","evidence_ids":[]}} with English
