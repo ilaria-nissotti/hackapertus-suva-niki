@@ -3,18 +3,15 @@
 Tests describe what the code does today. `# BUG:` marks behaviour that looks wrong.
 """
 
-from datetime import date
-
 import pytest
 
-from suva.parse.run import parse_all
 from suva.scoring.evaluate import calibration, evaluate, metrics, ranking, write_scores
 from suva.scoring.fit import fit_weights, recall_threshold, write_fitted
 from suva.scoring.rules import RuleSet, RulesError, load_rules, parse_rules
 from suva.scoring.score import ScoreResult, band_for, rule_features, score_record, to_score
-from suva.scoring.store import is_current, rules_hash, score_keys
+from suva.scoring.store import rules_hash
 from suva.sources.base import SourceRecord
-from test_scoring import JUDGEMENT, RULES, rec
+from test_scoring import RULES, rec
 
 
 def rule(**overrides):
@@ -188,34 +185,6 @@ def test_non_string_regex_is_a_rules_error(regex):
 def test_empty_rules_list_is_allowed_and_scores_base_only():
     rs = parse_rules({"rules": [], "base": -20})
     assert score_record(rec(), rs).points == -20
-
-
-# --- store.is_current vs the review app ------------------------------------------------------
-
-def test_is_current_ignores_inputs_hash_that_the_review_app_checks(repo):
-    import review_kb
-
-    key = "8C_1/2025@2025-10-02"
-    repo.upsert_judgement(SourceRecord(source="opencaselaw", source_id="8C_1/2025", docket="8C_1/2025",
-                                       decision_date=date(2025, 10, 2), text=JUDGEMENT))
-    parse_all(repo)
-    rs = load_rules()
-    score_keys(repo, [key], rs)
-    assert review_kb.get_record(repo, key, rules_hash(rs))["score_current"]
-
-    # A second source fills in the language; text and parse stay the same, so the score inputs change.
-    repo.upsert_judgement(SourceRecord(source="entscheidsuche", source_id="x", docket="8C_1/2025",
-                                       decision_date=date(2025, 10, 2), language="de"))
-    assert repo.get_judgement(key)["language"] == "de"
-    text = repo.get_judgement(key)["text"]
-    assert review_kb.get_record(repo, key, rules_hash(rs))["status"] == "Stale"
-    # BUG: is_current still says True. Expected: False, matching review_kb.record (compare inputs_hash too).
-    assert is_current(repo.get_score(key), text, rules_hash(rs))
-
-
-def test_is_current_with_no_score_or_no_text():
-    assert not is_current(None, "x", "h")
-    assert not is_current({}, "x", "h")
 
 
 def test_rules_hash_ignores_comments_but_not_weights():

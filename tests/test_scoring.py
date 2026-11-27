@@ -288,8 +288,8 @@ def test_judge_record_uses_rubric_and_is_cached(tmp_path, repo):
     assert judge_record(llm, record, ruleset, 40).cached and len(calls.calls) == 1
 
 
-def test_score_window_stores_scores_with_explanations_and_detects_staleness(repo):
-    from suva.scoring.store import is_current, rules_hash, score_window
+def test_score_window_stores_scores_with_explanations(repo):
+    from suva.scoring.store import score_window
     from suva.windows import challenge_window
 
     add(repo, "8C_10/2026", date(2026, 10, 1), JUDGEMENT)  # publication unknown: kept, counted
@@ -302,8 +302,4 @@ def test_score_window_stores_scores_with_explanations_and_detects_staleness(repo
     stored = repo.get_score("8C_10/2026@2026-10-01")
     assert stored["band"] == "high" and [f["id"] for f in stored["fired"]] == ["suva", "uvg"]
     assert stored["fired"][0]["explanation"] == "Suva is a party."
-    text = repo.get_judgement("8C_10/2026@2026-10-01")["text"]
-    assert is_current(stored, text, rules_hash(ruleset))
-    assert not is_current(stored, text + " changed", rules_hash(ruleset))
-    assert not is_current(stored, text, rules_hash(parse_rules(RULES | {"base": 0})))
     assert repo.get_score("8C_11/2026@2025-01-01") is None

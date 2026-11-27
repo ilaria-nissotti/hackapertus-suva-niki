@@ -2,7 +2,8 @@
 
 The stored score is what the review app shows: the 0-100 score, its band and the
 fired rules ("why selected / why not"). It stays current only while the rules file,
-the parse and the judgement text are unchanged; `is_current` checks all three.
+the parse and the judgement text are unchanged; the review app checks this
+(review_kb.record).
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from datetime import date
 from typing import Any
 
 from suva.hashing import sha256
-from suva.parse.segment import PARSER_VERSION
 from suva.scoring.dataset import features_record
 from suva.scoring.rules import RuleSet
 from suva.scoring.score import score_record
@@ -92,8 +92,3 @@ def _score_rows(repo: Repository, judgements: list[dict[str, Any]], ruleset: Rul
     repo.save_scores(rows)
     rep.scored, rep.by_band = len(rows), dict(bands)
     return rep
-
-
-def is_current(score: dict[str, Any] | None, text: str | None, current_rules_hash: str) -> bool:
-    return bool(score) and score["rules_hash"] == current_rules_hash \
-        and score["parser_version"] == PARSER_VERSION and score["text_hash"] == text_hash(text)
