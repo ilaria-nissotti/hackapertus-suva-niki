@@ -105,3 +105,8 @@ def test_download_publishes_valid_snapshot(tmp_path, monkeypatch):
     assert download_bger(destination) == destination
     assert [record.docket for record in read_bger(destination)] == ["8C_1/2025"]
     assert list(destination.parent.iterdir()) == [destination]
+
+
+def test_rows_without_a_docket_are_skipped(tmp_path):
+    p = write(tmp_path, [row(None, "2025-10-01"), row("  ", "2025-10-02"), row("8C_1/2025", "2025-10-03")])
+    assert [r.key for r in read_bger(p, date(2025, 10, 1), date(2025, 10, 31))] == ["8C_1/2025@2025-10-03"]

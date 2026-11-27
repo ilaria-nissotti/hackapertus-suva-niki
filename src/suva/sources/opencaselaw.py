@@ -90,6 +90,8 @@ def read_bger(
     dataset = ds.dataset(path, format="parquet")
     for batch in dataset.to_batches(columns=cols, filter=selection, batch_size=1024):
         for row in batch.to_pylist():
+            if not (row.get("docket_number") or "").strip():
+                continue  # no docket, no identity: skip instead of crashing the whole fetch
             rec = _to_record(row)
             prev = best.get(rec.key)
             if prev is None:
