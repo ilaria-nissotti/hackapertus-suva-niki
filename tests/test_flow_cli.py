@@ -185,6 +185,19 @@ def test_judge_uses_yaml_threshold_and_records_verdicts(settings, tmp_path, monk
     assert "candidates (rules score >= 101): 0 of 6" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("value, shown", [(None, "20"), (0, "0")])
+def test_judge_with_empty_or_zero_yaml_threshold(settings, tmp_path, monkeypatch, capsys, value, shown):
+    from suva import llm
+
+    build_dataset(settings)
+    client, _ = fake_client(reply='{"relevance": "low", "reason": "x"}')
+    monkeypatch.setattr(llm, "_build_openai_client", lambda s: client)
+    rules = tmp_path / "rules.yaml"
+    rules.write_text(yaml.safe_dump(RULES | {"judge": {"candidate_threshold": value}}), encoding="utf-8")
+    assert cli.main(["judge", "--rules", str(rules), "--limit", "1"]) == 0
+    assert f"rules score >= {shown})" in capsys.readouterr().out
+
+
 def test_judge_keeps_going_when_a_call_fails(settings, tmp_path, monkeypatch, capsys):
     from suva import llm
 

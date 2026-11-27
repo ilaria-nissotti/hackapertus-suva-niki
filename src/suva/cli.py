@@ -286,8 +286,9 @@ def cmd_judge(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     ruleset = load_rules(args.rules)
+    yaml_cutoff = ruleset.judge.get("candidate_threshold")  # an empty YAML value is None
     cutoff = args.candidate_threshold if args.candidate_threshold is not None \
-        else float(ruleset.judge.get("candidate_threshold", 20))
+        else float(20 if yaml_cutoff is None else yaml_cutoff)
     records = load_dataset(_dataset_path(args), args.split)
     candidates = [(r, s) for r in records if (s := score_record(r, ruleset)).score >= cutoff]
     candidates.sort(key=lambda rs: -rs[1].score)
