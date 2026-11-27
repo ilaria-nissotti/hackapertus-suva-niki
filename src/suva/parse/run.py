@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 
 from suva.hashing import sha256
-from suva.parse.citations import extract
+from suva.parse.citations import bge_header_reference, extract
 from suva.parse.segment import PARSER_VERSION, segment
 from suva.sources.base import parse_iso_date
 from suva.storage.base import AuditEntry, Repository
@@ -52,7 +52,12 @@ def parse_all(repo: Repository, force: bool = False) -> ParseReport:
             seg_status, seg_issues = prev["status"], prev["issues"]
         else:
             seg = segment(j["key"], text)
-            cits = {p.pid: extract(p.text, self_docket=j["docket"]) for p in seg.passages}
+            header = next((p.text for p in seg.passages if p.kind == "header"), "")
+            own_bge = bge_header_reference(header) if "bge_extract" in seg.issues else None
+            cits = {
+                p.pid: extract(p.text, self_docket=j["docket"], self_bge=own_bge)
+                for p in seg.passages
+            }
             if not repo.save_parse(seg, cits, text_hash):
                 status["stale"] += 1
                 issues["text_changed_during_parse"] += 1

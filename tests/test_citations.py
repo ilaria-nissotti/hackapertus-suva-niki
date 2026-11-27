@@ -54,3 +54,10 @@ def test_own_bge_page_markers_skipped():
     t = "6.2 Wie in BGE 134 V 109 E. 2.1 festgehalten. BGE 151 V 1 S. 4 Weiter."
     assert canon(t, self_bge="BGE 151 V 1") == ["BGE 134 V 109"]
     assert canon(t) == ["BGE 134 V 109", "BGE 151 V 1"]
+
+
+def test_bge_header_identifier_does_not_span_unrelated_lines():
+    from suva.parse.citations import bge_header_reference
+
+    assert bge_header_reference("Urteilskopf\n151\nV\n1\n") is None
+    assert bge_header_reference("Urteilskopf\r\n \t ATF 151 V 1 \r\n") == "BGE 151 V 1"

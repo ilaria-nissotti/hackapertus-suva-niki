@@ -43,8 +43,10 @@ ART_RE = re.compile(
 ARTICLE_LIST_RE = re.compile(r"(?:\s*(?:,|und\b|et\b|e\b)\s*\d+[a-z]?)+\s*")
 ARTICLE_NUMBER_RE = re.compile(r"\d+[a-z]?")
 PARA_RE = re.compile(r"(?:Abs\.|al\.|cpv\.)\s*(\d+[a-z]?)")
+BGE_NUMBER = r"(?P<vol>\d{1,3})\s+(?P<part>Ia|Ib|II|III|IV|V|VI|I)\s+(?P<page>\d{1,4})"
+BGE_HEADER_RE = re.compile(rf"\s*(?:(?:BGE|ATF|DTF)\s+)?{BGE_NUMBER}\s*")
 BGE_RE = re.compile(
-    r"\b(?P<coll>BGE|ATF|DTF)\s+(?P<vol>\d{1,3})\s+(?P<part>Ia|Ib|II|III|IV|V|VI|I)\s+(?P<page>\d{1,4})\b"
+    rf"\b(?:BGE|ATF|DTF)\s+{BGE_NUMBER}\b"
     r"(?:\s*(?:E\.|consid\.|cons\.)\s*(?P<cons>\d+(?:\.\d+)*))?"
 )
 
@@ -59,6 +61,15 @@ class Citation:
     law: str | None = None  # canonical law, e.g. "UVG"
     article: str | None = None
     consideration: str | None = None  # BGE "E. 2.1"
+
+
+def bge_header_reference(header: str) -> str | None:
+    """Read the printed identifier from a BGE extract header."""
+    for line in header.splitlines():
+        match = BGE_HEADER_RE.fullmatch(line)
+        if match:
+            return f"BGE {' '.join(match.groups())}"
+    return None
 
 
 def extract(text: str, self_docket: str | None = None, self_bge: str | None = None) -> list[Citation]:

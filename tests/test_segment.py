@@ -255,3 +255,21 @@ def test_extract_start_rule_only_for_bge():
     # an ordinary judgement must still start at E. 1: "6." right after the heading is not trusted
     t = DE.replace("Erwägungen:\n\n1.\n\n", "Erwägungen:\n\n6.\n\n")
     assert "E.6" not in ids(segment("k", t))
+
+
+def test_bge_excerpt_can_start_mid_subsection_and_skip_numbers():
+    text = BGE_DE.replace("Erwägungen\n\nAus den Erwägungen:", "Aus den Erwägungen:")
+    text = text[:text.index("\n\n6.\n\n")] + (
+        "\n\n5. Januar 2024 war ein Datum."
+        "\n\n29 août 2024."
+        "\n\n30 agosto 2024."
+        "\n\n6.2.3 Ein Erwägungsabschnitt."
+        "\n\n6.2.3 Wiederholte Nummer im Text."
+        "\n\n8.2 Eine weitere Erwägung."
+    ) + (" Weitere Erwägung." * 60)
+    result = segment("k", text)
+    assert result.status == "ok"
+    assert ids(result)[-3:] == ["reasons", "E.6.2.3", "E.8.2"]
+    assert "5. Januar" in result.passages[-3].text
+    assert "Wiederholte Nummer" in result.passages[-2].text
+    assert all(p.text == text[p.start:p.end] for p in result.passages)

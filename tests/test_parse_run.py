@@ -67,3 +67,14 @@ def test_parse_reports_text_changed_during_save(repo, monkeypatch):
     assert report.status == {"stale": 1}
     assert report.issues == {"text_changed_during_parse": 1}
     assert repo.list_passages("8C_1/2025@2025-10-02") == []
+
+
+def test_parse_run_excludes_own_bge_page_markers(repo):
+    from test_segment import BGE_DE
+
+    docket = "9C_480/2022"
+    add(repo, docket, BGE_DE.replace("7. Die Beschwerde", "7. Gemäss BGE 134 V 109 ist die Beschwerde"))
+    key = f"{docket}@2025-10-02"
+    report = parse_all(repo)
+    assert report.status == {"ok": 1}
+    assert [c["canonical"] for c in repo.list_citations(key) if c["kind"] == "bge"] == ["BGE 134 V 109"]

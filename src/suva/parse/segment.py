@@ -12,9 +12,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from suva.sources.base import MONTHS
 from suva.sources.quality import is_error_page
 
-PARSER_VERSION = "segment-v4"
+PARSER_VERSION = "segment-v6"
 MIN_TEXT_CHARS = 1000
 
 FACTS_RE = re.compile(r"^(Sachverhalt|Faits|Fatti)(\s+ab Seite \d+)?\s*:?$", re.I)
@@ -41,6 +42,8 @@ NUM_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.?(?:\s+.*)?$", re.S)
 
 REGESTE_RE = re.compile(r"^Regeste(\s+[a-z])?$")
 BGE_EXTRACT_RE = re.compile(r"^(Urteilskopf|\d+\.\s+(Auszug aus dem Urteil|Extrait de l'arrêt|Estratto della sentenza)\b)")
+BGE_REASON_EXCERPT_RE = re.compile(r"^(Aus den Erwägungen|Extrait des considérants|Dai considerandi)\s*:?$", re.I)
+DATE_START_RE = re.compile(r"^\d{1,2}\.?\s+(\w+)")
 
 PARTIES_RE = re.compile(r"^(Verfahrensbeteiligte|Participants à la procédure|Partecipanti al procedimento|Parties)$", re.I)
 SUBJECT_RE = re.compile(r"^(Gegenstand|Objet|Oggetto)$", re.I)
@@ -87,14 +90,10 @@ def paragraphs(text: str) -> list[_Para]:
 
 
 def _plausible_next(prev: tuple[int, ...] | None, cand: tuple[int, ...], extract: bool = False) -> bool:
-    """cand may follow prev: first child, next sibling, or next at a higher level.
-
-    A BGE extract may start anywhere ("Aus den Erwägungen: 6. …"), so its first
-    consideration can be any top-level number or that number's first child.
-    """
+    """Full decisions are consecutive; published extracts can omit sections."""
+    if extract:
+        return all(cand) and (prev is None or cand > prev)
     if prev is None:
-        if extract:
-            return len(cand) == 1 or (len(cand) == 2 and cand[1] == 1)
         return cand in ((1,), (1, 1))
     if cand == prev + (1,):
         return True
@@ -131,7 +130,8 @@ def _reason_spans(paras: list[_Para], start: int, end: int, extract: bool = Fals
     first = start
     for i in range(start + 1, end):
         match = NUM_RE.match(paras[i].text)
-        if match:
+        date_start = DATE_START_RE.match(paras[i].text) if extract else None
+        if match and not (date_start and date_start[1].casefold() in MONTHS):
             candidate = tuple(map(int, match[1].split(".")))
             if _plausible_next(number, candidate, extract):
                 yield first, i, number
@@ -154,6 +154,8 @@ def segment(key: str, text: str | None) -> Segmentation:
     if extract:
         seg.issues.append("bge_extract")
     reasons = _find(paras, REASONS_RE)
+    if extract and reasons is None:
+        reasons = _find(paras, BGE_REASON_EXCERPT_RE)
     outcome = _find(paras, DISPOSITIV_RE, 0 if reasons is None else reasons + 1, max_len=200)
     body_end = len(paras) if outcome is None else outcome
 
