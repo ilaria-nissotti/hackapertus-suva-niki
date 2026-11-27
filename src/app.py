@@ -7,8 +7,9 @@ summary drafts, approvals, audio briefings and cases a reviewer added by hand.
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import date
+import fcntl
 import hashlib
 from io import BytesIO
 import json
@@ -127,12 +128,23 @@ def get_result(db, record, kind, config):
 app.register_blueprint(conversation.routes(load_record))
 
 
+@contextmanager
+def summary_lock(record, kind, config):
+    """One generation per draft at a time, also across the web server and `summarize-top`."""
+    lock_dir = Path(app.config["DATABASE"]).parent / "summary-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    name = hashlib.sha256(f"{record['key']}\0{kind}\0{generation_version(record, config)}".encode()).hexdigest()
+    with (lock_dir / name).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def process(key, kind, *, record=None, config=None):
     record = load_record(key) if record is None else record
     if record is None:
         return False
-    with closing(connect()) as db:
-        config = current_config() if config is None else config
+    config = current_config() if config is None else config
+    with summary_lock(record, kind, config), closing(connect()) as db:
         model = config["LLM_NAME"]
         existing = get_result(db, record, kind, config)
         if existing and existing["payload"]:

@@ -406,6 +406,41 @@ def test_process_drafts_after_facts_and_caches_both(client, case, monkeypatch):
     assert calls == ["facts", "de", "fr"]
 
 
+def test_concurrent_jobs_for_the_same_draft_call_the_model_once(client, case, monkeypatch):
+    import threading
+    import time
+
+    calls = []
+
+    def slow_facts(config, text):
+        calls.append(1)
+        time.sleep(0.2)
+        return dict(FACTS)
+
+    monkeypatch.setattr(dashboard, "make_facts", slow_facts)
+    results = []
+    app_config = dict(dashboard.app.config)
+
+    def job():
+        with patch.dict(dashboard.app.config, app_config):
+            results.append(dashboard.process(case, "facts", config=CONFIG))
+
+    threads = [threading.Thread(target=job) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results == [True, True, True] and len(calls) == 1  # the others reuse the stored brief
+
+
+def test_different_drafts_do_not_share_a_lock(client, case, monkeypatch):
+    monkeypatch.setattr(dashboard, "make_facts", lambda config, text: dict(FACTS))
+    monkeypatch.setattr(dashboard, "draft", lambda config, record, facts, lang, ex: {"summary": lang, "quotes": ["q"]})
+    assert dashboard.process(case, "de", config=CONFIG)  # holds the de lock while it builds the facts
+    locks = list((dashboard.app.config["DATABASE"].parent / "summary-locks").iterdir())
+    assert len(locks) == 2  # one lock file per (case, kind, version): de and facts
+
+
 def test_process_unknown_case_returns_false(client, case):
     assert dashboard.process("8C_404/2026@2026-10-01", "de", config=CONFIG) is False
 
