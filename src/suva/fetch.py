@@ -80,7 +80,7 @@ class _FetchRun:
             seen.in_window.add(rec.source)
         if rec.html_url and rec.source == entscheidsuche.SOURCE:
             seen.attachment = rec
-        seen.has_text |= bool(rec.text)
+        seen.has_text |= bool(usable_text(rec.text))
 
     def collect_opencaselaw(self, raw_dir: Path, refresh: bool) -> dict[str, date]:
         window = self.window

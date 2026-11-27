@@ -216,3 +216,15 @@ def test_fetch_survives_a_snapshot_row_without_a_docket(tmp_path, repo):
     rep = fetch(repo, raw, DEV, use_entscheidsuche=False)
     assert rep.errors == [] and list(rep.sightings) == ["8C_1/2025@2025-10-03"]
     assert repo.list_audit(kind="fetch_run")  # the run ledger is written
+
+
+def test_unusable_text_does_not_count_as_having_text(repo):
+    from suva.fetch import _FetchRun
+    from test_quality import ERROR
+
+    run = _FetchRun(repo, DEV, include_picks=False)
+    run.record(SourceRecord("opencaselaw", "a", "8C_1/2025", date(2025, 10, 2), text=ERROR), in_window=True)
+    assert repo.get_judgement("8C_1/2025@2025-10-02")["text"] is None  # the KB rejects the error page
+    assert run.decisions["8C_1/2025@2025-10-02"].has_text is False  # and so does the run report
+    run.record(SourceRecord("opencaselaw", "a", "8C_1/2025", date(2025, 10, 2), text=SUVA_CASE), in_window=True)
+    assert run.decisions["8C_1/2025@2025-10-02"].has_text is True
