@@ -42,6 +42,18 @@ def cmd_import_supplied(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_split_examples(args: argparse.Namespace) -> int:
+    """Freeze the few-shot / eval split of the example summaries."""
+    from suva.ingest.split import apply_split
+
+    repo = open_repository(load_settings())
+    try:
+        print(json.dumps(apply_split(repo, args.n_eval), indent=2))
+    finally:
+        repo.close()
+    return 0
+
+
 def cmd_llm_ping(args: argparse.Namespace) -> int:
     """Check the gateway: one tiny uncached call, print model, latency, tokens."""
     from suva.llm import LLMClient
@@ -74,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("import-supplied", help="load Suva's example summaries + picked list into the KB")
     p.add_argument("--dir", help="directory with Export_*.html and BG_Urteile_*.xlsx (default: judgements/)")
     p.set_defaults(func=cmd_import_supplied)
+
+    p = sub.add_parser("split-examples", help="freeze the few-shot / eval split (never moves an assigned one)")
+    p.add_argument("--n-eval", type=int, default=15)
+    p.set_defaults(func=cmd_split_examples)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")
     p.add_argument("--prompt", default="Antworte mit genau einem Wort: Bereit?")
