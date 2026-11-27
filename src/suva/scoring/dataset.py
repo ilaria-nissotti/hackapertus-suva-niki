@@ -1,7 +1,9 @@
 """Build the labelled dataset: one record per judgement in the Excel's period.
 
-Label: relevant if the docket is a row of the Excel (known_positives with in_xlsx=1),
-otherwise not relevant. The example summaries (Export_*.html) are NOT labels; they
+Label: relevant if the decision is a row of the Excel (known_positives with in_xlsx=1),
+otherwise not relevant. Dated refs (docket@YYYY-MM-DD) match that decision exactly; a
+docket-only ref matches only when the docket has a single decision in the period, and is
+reported as ambiguous otherwise (same rule as fetch and parse). The example summaries (Export_*.html) are NOT labels; they
 are style examples for summarising.
 
 Split: decisions on or after `test_from` form the test set (time-based, closest to
@@ -11,12 +13,13 @@ real use: rules built on the past, applied to new judgements).
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Iterator
 
+from suva.sources.base import parse_iso_date
 from suva.storage.base import Repository
 from suva.windows import DEV_END, DEV_START
 
@@ -35,14 +38,44 @@ class DatasetReport:
     by_split: dict = field(default_factory=dict)
     without_text: int = 0
     parse_status: dict = field(default_factory=dict)
-    picks_not_in_dataset: list[str] = field(default_factory=list)  # Excel dockets with no judgement in the period
+    picks_not_in_dataset: list[str] = field(default_factory=list)  # Excel refs with no judgement in the period
+    picks_ambiguous: list[str] = field(default_factory=list)  # docket-only refs with several decisions
 
     def as_dict(self) -> dict:
         return asdict(self)
 
 
-def relevant_dockets(repo: Repository) -> set[str]:
-    return {p["docket"] for p in repo.list_known_positives(court="bger") if p["in_xlsx"] and p["docket"]}
+@dataclass
+class LabelMatch:
+    keys: set[str] = field(default_factory=set)  # judgement keys labelled relevant
+    missing: list[str] = field(default_factory=list)
+    ambiguous: list[str] = field(default_factory=list)
+
+
+def match_labels(repo: Repository, rows: list[dict[str, Any]]) -> LabelMatch:
+    """Match the Excel picks to the judgements in `rows` (dated refs exactly, docket-only if unique)."""
+    keys = {row["key"] for row in rows}
+    by_docket = defaultdict(list)
+    for row in rows:
+        by_docket[row["docket"]].append(row["key"])
+    result = LabelMatch()
+    for label in repo.list_known_positives(court="bger"):
+        if not (label["in_xlsx"] and label["docket"]):
+            continue
+        ref = label["ref"]
+        if parse_iso_date(ref.partition("@")[2]):
+            candidates = [ref] if ref in keys else []
+        else:
+            candidates = by_docket[label["docket"]]
+        if len(candidates) == 1:
+            result.keys.add(candidates[0])
+        elif candidates:
+            result.ambiguous.append(ref)
+        else:
+            result.missing.append(ref)
+    result.missing.sort()
+    result.ambiguous.sort()
+    return result
 
 
 def build_record(repo: Repository, row: dict[str, Any], positives: set[str], test_from: date) -> dict[str, Any]:
@@ -61,7 +94,7 @@ def build_record(repo: Repository, row: dict[str, Any], positives: set[str], tes
         "decision_date": decision,
         "chamber": row["chamber_prefix"],
         "language": row["language"],
-        "relevant": row["docket"] in positives,
+        "relevant": row["key"] in positives,
         "split": "test" if decision and date.fromisoformat(decision) >= test_from else "train",
         "parse_status": parse.get("status"),
         "parties": parse.get("parties") or "",
@@ -81,9 +114,10 @@ def build_dataset(
     repo: Repository, out_path: Path, start: date = DEV_START, end: date = DEV_END, test_from: date = TEST_FROM,
 ) -> DatasetReport:
     rep = DatasetReport(start.isoformat(), end.isoformat(), test_from.isoformat())
-    positives = relevant_dockets(repo)
     rows = repo.list_judgements(start=start.isoformat(), end=end.isoformat())
-    splits, status, found = Counter(), Counter(), set()
+    labels = match_labels(repo, rows)
+    positives = labels.keys
+    splits, status = Counter(), Counter()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
         for row in rows:
@@ -94,10 +128,8 @@ def build_dataset(
             splits[f"{rec['split']}_{'relevant' if rec['relevant'] else 'not_relevant'}"] += 1
             status[rec["parse_status"] or "not_parsed"] += 1
             rep.without_text += not rec["text"]
-            if rec["relevant"]:
-                found.add(rec["docket"])
     rep.by_split, rep.parse_status = dict(sorted(splits.items())), dict(status)
-    rep.picks_not_in_dataset = sorted(positives - found)
+    rep.picks_not_in_dataset, rep.picks_ambiguous = labels.missing, labels.ambiguous
     return rep
 
 

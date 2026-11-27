@@ -210,6 +210,26 @@ def test_build_dataset_labels_from_excel_only_and_splits_by_date(repo, tmp_path)
     assert len(load_dataset(out, "test")) == 1
 
 
+def test_dated_pick_labels_only_that_decision(repo, tmp_path):
+    add(repo, "8C_5/2025", date(2025, 11, 3), JUDGEMENT)
+    add(repo, "8C_5/2025", date(2026, 1, 20), JUDGEMENT)  # same docket, later decision
+    repo.upsert_known_positive(dict(ref="8C_5/2025@2025-11-03", docket="8C_5/2025", court="bger",
+                                    in_xlsx=1, in_exports=0))
+    out = tmp_path / "dataset.jsonl"
+    rep = build_dataset(repo, out)
+    assert rep.relevant == 1 and rep.picks_ambiguous == [] and rep.picks_not_in_dataset == []
+    assert {r["key"]: r["relevant"] for r in load_dataset(out)} == {
+        "8C_5/2025@2025-11-03": True, "8C_5/2025@2026-01-20": False}
+
+
+def test_docket_only_pick_with_several_decisions_is_ambiguous(repo, tmp_path):
+    add(repo, "8C_6/2025", date(2025, 11, 3), JUDGEMENT)
+    add(repo, "8C_6/2025", date(2026, 1, 20), JUDGEMENT)
+    repo.upsert_known_positive(dict(ref="8C_6/2025", docket="8C_6/2025", court="bger", in_xlsx=1, in_exports=0))
+    rep = build_dataset(repo, tmp_path / "dataset.jsonl")
+    assert rep.relevant == 0 and rep.picks_ambiguous == ["8C_6/2025"] and rep.picks_not_in_dataset == []
+
+
 def test_parse_verdict_accepts_json_inside_text_and_rejects_bad_answers():
     assert parse_verdict('Sure: {"relevance": "High", "reason": "UVG causal link."}') == (
         "high", "UVG causal link.", None)
