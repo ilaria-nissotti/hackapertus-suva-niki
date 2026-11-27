@@ -116,6 +116,19 @@ def cmd_coverage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_parse(args: argparse.Namespace) -> int:
+    """Split stored judgements into passages and extract citations (new or changed texts only)."""
+    from suva.parse.run import parse_all
+
+    repo = open_repository(load_settings())
+    try:
+        rep = parse_all(repo, force=args.force)
+    finally:
+        repo.close()
+    print(json.dumps(rep.as_dict(), indent=2, ensure_ascii=False))
+    return 0
+
+
 def cmd_llm_ping(args: argparse.Namespace) -> int:
     """Check the gateway: one tiny uncached call, print model, latency, tokens."""
     from suva.llm import LLMClient
@@ -171,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--start", required=True, help="YYYY-MM-DD")
     p.add_argument("--end", required=True, help="YYYY-MM-DD")
     p.set_defaults(func=cmd_coverage)
+
+    p = sub.add_parser("parse", help="split judgements into passages (E. numbers) and extract citations")
+    p.add_argument("--force", action="store_true", help="re-parse everything, not only new/changed texts")
+    p.set_defaults(func=cmd_parse)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")
     p.add_argument("--prompt", default="Antworte mit genau einem Wort: Bereit?")
