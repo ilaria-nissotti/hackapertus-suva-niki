@@ -49,3 +49,27 @@ def repo(tmp_path):
     r.migrate()
     yield r
     r.close()
+
+
+def seed_kb(path, docket, text, decided=None, score=None, band=None):
+    """A knowledge base with one parsed, rules-scored judgement (for the review app tests).
+    `score`/`band` override the stored rules score while keeping it current."""
+    from datetime import date
+
+    from suva.parse.run import parse_all
+    from suva.scoring.rules import load_rules
+    from suva.scoring.store import score_keys
+    from suva.sources.base import SourceRecord
+
+    kb = SQLiteRepository(path)
+    kb.migrate()
+    rec = SourceRecord(source="opencaselaw", source_id=docket, docket=docket,
+                       decision_date=decided or date(2026, 10, 1), text=text)
+    kb.upsert_judgement(rec)
+    parse_all(kb)
+    score_keys(kb, [rec.key], load_rules())
+    if score is not None:
+        row = kb.get_score(rec.key)
+        kb.save_scores([row | {"score": score, "band": band or row["band"]}])
+    kb.close()
+    return rec.key

@@ -345,6 +345,27 @@ class SQLiteRepository(Repository):
     def list_scores(self) -> list[dict[str, Any]]:
         return [self._score_row(r) for r in self.conn.execute("SELECT * FROM relevance_scores ORDER BY score DESC")]
 
+    def list_review_rows(self, start=None, end=None, keys=None) -> list[dict[str, Any]]:
+        sql = ("SELECT j.key, j.docket, j.decision_date, j.publication_date, j.publication_date_source,"
+               " j.language, j.text, p.subject, s.score, s.band, s.fired, s.rules_hash,"
+               " s.parser_version AS score_parser_version, s.text_hash AS score_text_hash"
+               " FROM judgements j LEFT JOIN parses p ON p.key = j.key"
+               " LEFT JOIN relevance_scores s ON s.key = j.key WHERE 1=1")
+        args: list[Any] = []
+        if start:
+            sql += " AND j.decision_date >= ?"
+            args.append(start)
+        if end:
+            sql += " AND j.decision_date <= ?"
+            args.append(end)
+        if keys is not None:
+            if not keys:
+                return []
+            sql += f" AND j.key IN ({', '.join('?' * len(keys))})"
+            args.extend(keys)
+        return [{**dict(r), "fired": json.loads(r["fired"]) if r["fired"] else []}
+                for r in self.conn.execute(sql + " ORDER BY j.decision_date DESC, j.docket", args)]
+
     def close(self) -> None:
         self.conn.close()
 

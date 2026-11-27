@@ -1,0 +1,89 @@
+"""Judgements and rules scores for the review app, read from the suva knowledge base.
+
+The app does no scraping or scoring of its own. `python -m suva fetch` fills the
+knowledge base, `parse` splits the text and `score` stores the rules score with its
+explanation. This module turns those rows into the records the app shows. A record's
+`key` (docket@decision-date) is its identity; `docket` is for display.
+"""
+
+from datetime import date
+from pathlib import Path
+
+from suva.parse.run import parse_all
+from suva.scoring.rules import load_rules
+from suva.scoring.store import is_current, rules_hash, score_keys
+from suva.sources.base import SourceRecord, decision_id
+from suva.storage.sqlite import SQLiteRepository
+from suva.windows import Window, challenge_window
+
+STATUS = {"high": "Relevant", "check": "Review", "low": "Low relevance"}
+
+
+def open_kb(path):
+    repo = SQLiteRepository(Path(path))
+    repo.migrate()
+    return repo
+
+
+def window_for(today=None) -> Window:
+    return challenge_window(today or date.today())
+
+
+def current_rules_hash() -> str:
+    return rules_hash(load_rules())
+
+
+def record(row, rules_digest):
+    """One judgement as the app shows it. `full_text` is the stored judgement text."""
+    current = row["score"] is not None and is_current(
+        {"rules_hash": row["rules_hash"], "parser_version": row["score_parser_version"],
+         "text_hash": row["score_text_hash"]}, row["text"], rules_digest)
+    score = round(row["score"]) if row["score"] is not None else None
+    return {
+        "key": row["key"], "docket": row["docket"], "title": row["subject"] or row["docket"],
+        "decision_date": row["decision_date"], "publication_date": row["publication_date"],
+        "date_source": row["publication_date_source"], "language": row["language"],
+        "full_text": row["text"] or "", "source_url": None,
+        "score": score, "band": row["band"], "fired": row["fired"], "score_current": current,
+        "status": ("Unscored" if score is None else STATUS[row["band"]] if current else "Stale"),
+    }
+
+
+def window_records(repo, window: Window, extra_keys=(), rules_digest=None):
+    """Judgements in the window (publication date in it or unknown) plus cases added by hand."""
+    digest = rules_digest or current_rules_hash()
+    rows = repo.list_review_rows(start=window.start.isoformat(), end=window.end.isoformat())
+    rows = [r for r in rows if window.includes_publication(
+        date.fromisoformat(r["publication_date"]) if r["publication_date"] else None)]
+    seen = {r["key"] for r in rows}
+    rows += repo.list_review_rows(keys=[k for k in extra_keys if k not in seen])
+    return [record(r, digest) for r in rows]
+
+
+def get_record(repo, key, rules_digest=None):
+    rows = repo.list_review_rows(keys=[key])
+    if not rows:
+        return None
+    result = record(rows[0], rules_digest or current_rules_hash())
+    result["source_url"] = next((s["url"] for s in repo.judgement_sources(key) if s["url"]), None)
+    return result
+
+
+def find_keys(repo, docket, decision_date=None):
+    """Keys of the stored decisions of a docket (one key if the decision date is given)."""
+    keys = [r["key"] for r in repo.list_judgements(dockets={docket})]
+    if decision_date:
+        wanted = decision_id(docket, decision_date)
+        return [k for k in keys if k == wanted]
+    return keys
+
+
+def add_text(repo, docket, text, decision_date=None, publication_date=None, source_url=None):
+    """Store an uploaded judgement text, then parse and score it like any fetched one."""
+    rec = SourceRecord(source="manual", source_id=decision_id(docket, decision_date), docket=docket,
+                       decision_date=decision_date, publication_date=publication_date,
+                       url=source_url, text=text)
+    repo.upsert_judgement(rec)
+    parse_all(repo)
+    score_keys(repo, [rec.key], load_rules())
+    return rec.key

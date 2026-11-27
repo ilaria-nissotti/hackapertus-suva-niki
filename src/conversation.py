@@ -1,6 +1,5 @@
 """Case-specific question answering with optional speech input and output."""
 
-from contextlib import closing
 import json
 import re
 from urllib.error import HTTPError, URLError
@@ -12,7 +11,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 from bger import model_config
 from briefing import LANGUAGES, narrate, voice_config
-from triage import ask, passages
+from summaries import ask, passages
 
 MAX_UPLOAD = 3 * 1024 * 1024
 FORMATS = {"audio/webm": "webm", "video/webm": "webm", "audio/mp4": "mp4",
@@ -78,10 +77,18 @@ def transcribe(audio, media_type, lang, key):
     return bounded(data.get("text"), MAX_QUESTION)
 
 
-def discuss(config, record, lang, question, history, triage):
+def app_score(record):
+    """The rules score the app shows, as the model may explain it (None if missing or stale)."""
+    if record.get("score") is None or not record.get("score_current"):
+        return None
+    return {"score": record["score"], "band": record["band"],
+            "reasons": [f"{f['points']:+g} {f['explanation']}" for f in record["fired"]]}
+
+
+def discuss(config, record, lang, question, history, rating):
     source = evidence_lines(record["full_text"])
-    score_question = bool(triage and SCORE_QUESTION.search(question))
-    if triage and re.search(rf"\b{triage['score']}\b", question):
+    score_question = bool(rating and SCORE_QUESTION.search(question))
+    if rating and re.search(rf"\b{rating['score']}\b", question):
         score_question = True
     result = ask(config, f"""Answer in {LANGUAGES[lang]} using the current court ruling.
 Return exactly {{"kind":"court","answer":"…","evidence_ids":[]}} with English
@@ -89,12 +96,12 @@ keys and the answer in {LANGUAGES[lang]}. Use kind "court", "score", or "uncerta
 List at most three line numbers, strongest first. Cite the dispositive or
 reasoning rather than headings or party arguments.
 "court" requires source lines that directly support the answer.
-"score" explains the app's saved ranking in app_triage and clearly attributes
-it to the app. For a court finding in a score explanation cite the ruling too.
+"score" explains the app's rules-based score in app_score (the reasons are the
+rules that fired) and clearly attributes it to the app. For a court finding in a score explanation cite the ruling too.
 When the source does not establish the answer, use "uncertain". No legal advice,
 invented findings, cross-case claims, or actions. History is context only.""",
                  {"question": question, "judgment_lines": source, "history": history,
-                  "app_triage": triage if score_question else None}, 550)
+                  "app_score": rating if score_question else None}, 550)
     kind = result.get("kind")
     try:
         if kind not in ("court", "score", "uncertain") or (kind == "score" and not score_question):
@@ -108,7 +115,7 @@ invented findings, cross-case claims, or actions. History is context only.""",
             evidence = []
         if kind == "score":
             label = "App-Bewertung" if lang == "de" else "Score de l’application"
-            answer = bounded(f"{label} ({triage['score']}/100). {answer}", MAX_ANSWER)
+            answer = bounded(f"{label} ({rating['score']}/100). {answer}", MAX_ANSWER)
     except (ValueError, KeyError):
         answer = ("Das lässt sich anhand dieses Urteils nicht verlässlich beantworten."
                   if lang == "de" else "Ce jugement ne permet pas de répondre de manière fiable.")
@@ -140,7 +147,8 @@ questions as open. Include court takeaways only when those passages support them
     return output
 
 
-def routes(connect, get_result):
+def routes(load_record):
+    """load_record(key) returns the app's record for a judgement key, or None."""
     blueprint = Blueprint("conversation", __name__, url_prefix="/conversation")
 
     @blueprint.errorhandler(RequestEntityTooLarge)
@@ -156,11 +164,10 @@ def routes(connect, get_result):
         form = request.form if action == "transcribe" else request.get_json(silent=True)
         if not hasattr(form, "get"):
             return jsonify(error="Invalid request."), 400
-        docket, lang = form.get("case"), form.get("lang")
-        if not isinstance(docket, str) or not isinstance(lang, str) or lang not in LANGUAGES:
+        key, lang = form.get("case"), form.get("lang")
+        if not isinstance(key, str) or not isinstance(lang, str) or lang not in LANGUAGES:
             return jsonify(error="Select a case and language."), 400
-        with closing(connect()) as db:
-            record = db.execute("SELECT * FROM judgments WHERE docket=?", (docket,)).fetchone()
+        record = load_record(key)
         if record is None:
             return jsonify(error="Judgment not found."), 404
         try:
@@ -197,10 +204,7 @@ def routes(connect, get_result):
             config = model_config()
             if action == "recap":
                 return jsonify(recap(config, record, lang, history))
-            with closing(connect()) as db:
-                row = get_result(db, record, "triage", config["LLM_NAME"])
-            triage = json.loads(row["payload"]) if row and row["payload"] else None
-            return jsonify(discuss(config, record, lang, question, history, triage))
+            return jsonify(discuss(config, record, lang, question, history, app_score(record)))
         except HTTPError as exc:
             if action == "transcribe" and exc.code in (401, 403):
                 return jsonify(error="ElevenLabs denied transcription. Check Speech to Text access on the API key."), 502

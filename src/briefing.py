@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from bger import local_config
-from triage import ask, passages, resolve_passages
+from summaries import ask, passages, resolve_passages
 
 PROMPT_VERSION = "briefing-2"
 VOICE_MODEL = "eleven_multilingual_v2"
@@ -31,7 +31,7 @@ def context(record, summary, model, version, lang, voice):
     if not summary or not summary["approved"] or not voice:
         return None
     approved = summary["approved"]
-    inputs = (record["docket"], lang, version, model, PROMPT_VERSION,
+    inputs = (record["key"], lang, version, model, PROMPT_VERSION,
               VOICE_MODEL, voice, hashlib.sha256(approved.encode()).hexdigest())
     key = hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
     return key, approved

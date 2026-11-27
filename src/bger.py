@@ -1,17 +1,16 @@
-"""Collect Swiss Federal Supreme Court judgments and check Apertus."""
+"""Shared helpers for the review app: case IDs, the export HTML reader, config and Apertus chat.
 
-import argparse
+Judgements come from the suva knowledge base (`python -m suva fetch`); `python -m suva
+llm-ping` checks the Apertus endpoint.
+"""
+
 from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path
 import re
-import sys
-from time import sleep
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE_ID = re.compile(r"\b\d+[A-Z]+_\d+/\d{4}\b")
@@ -49,83 +48,6 @@ class JudgmentExport(HTMLParser):
             self.title.append(data)
         if self.in_body:
             self.body.append(data)
-
-
-def import_exports(directory):
-    paths = sorted(directory.glob("Export_*.html"))
-    if not paths:
-        raise ValueError(f"No Export_*.html files found in {directory}")
-    for path in paths:
-        parser = JudgmentExport()
-        parser.feed(path.read_text(encoding="utf-8-sig"))
-        parser.close()
-        title = "".join(parser.title).strip()
-        case_ids = list(dict.fromkeys(CASE_ID.findall(title)))
-        if not case_ids:
-            filename_id = re.match(r"Export_(\d[A-Z]+_\d+)_(\d{4})\b", path.stem)
-            if filename_id:
-                case_ids = ["/".join(filename_id.groups())]
-        body = "\n".join(
-            line.strip() for line in "".join(parser.body).splitlines() if line.strip()
-        )
-        if not case_ids or not body:
-            raise ValueError(f"Missing case ID or body in {path.name}")
-        print(json.dumps({
-            "case_ids": case_ids,
-            "title": title,
-            "export_language": parser.language,
-            "source_file": path.name,
-            "text": body,
-        }, ensure_ascii=False))
-
-
-def fetch_opencaselaw(path):
-    with urlopen(f"https://mcp.opencaselaw.ch/api/{path}", timeout=30) as response:
-        result = json.load(response)
-    sleep(0.25)
-    return result
-
-
-def iter_judgments(args):
-    offset = 0
-    seen = set()
-    while True:
-        params = urlencode({
-            "court": "bger",
-            "published_from": args.published_from,
-            "published_to": args.published_to,
-            "sort": "published_desc",
-            "limit": min(args.limit - len(seen), 100) if args.limit else 100,
-            "offset": offset,
-            "include_pinpoint": "false",
-        })
-        page = fetch_opencaselaw(f"decisions?{params}")
-        for record in page["results"]:
-            decision_id = record["decision_id"]
-            if decision_id in seen:
-                continue
-            if args.full_text:
-                detail = fetch_opencaselaw(f"decisions/{quote(decision_id, safe='')}")
-                if not (detail.get("full_text") or "").strip():
-                    raise ValueError(f"No full text returned for {decision_id}")
-                record = {**record, **detail}
-            yield record
-            seen.add(decision_id)
-            if args.limit and len(seen) >= args.limit:
-                return
-        if not page["has_more"]:
-            if not page["total_is_lower_bound"] and len(seen) != page["total"]:
-                raise ValueError(f"Collected {len(seen)} of {page['total']} records")
-            return
-        next_offset = page["next_offset"]
-        if not isinstance(next_offset, int) or next_offset <= offset:
-            raise ValueError("OpenCaseLaw returned an invalid continuation offset")
-        offset = next_offset
-
-
-def collect_judgments(args):
-    for record in iter_judgments(args):
-        print(json.dumps(record, ensure_ascii=False), flush=True)
 
 
 def local_config(*names):
@@ -171,44 +93,3 @@ def chat(config, messages, max_tokens):
     if choice.get("finish_reason") == "length":
         raise ValueError("Apertus response exceeded the output budget")
     return choice["message"]["content"]
-
-
-def check_apertus():
-    config = model_config()
-    chat(config, [{"role": "user", "content": "Reply with the single word READY."}], 32)
-    print(f"Apertus responded successfully using {config['LLM_NAME']}.")
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    importer = commands.add_parser("import-exports", help="Emit one JSON record per export")
-    importer.add_argument("--directory", type=Path, default=ROOT / "judgements")
-    crawler = commands.add_parser("collect", help="Fetch judgments from OpenCaseLaw as JSONL")
-    crawler.add_argument("--published-from", default="2026-04-01")
-    crawler.add_argument("--published-to", default="2026-06-30")
-    crawler.add_argument("--limit", type=int, help="Stop after this many judgments")
-    crawler.add_argument("--full-text", action="store_true")
-    commands.add_parser("check-apertus", help="Send a short test prompt")
-    args = parser.parse_args()
-    try:
-        if args.command == "import-exports":
-            import_exports(args.directory)
-        elif args.command == "collect":
-            if args.limit is not None and args.limit < 1:
-                parser.error("--limit must be positive")
-            collect_judgments(args)
-        else:
-            check_apertus()
-    except HTTPError as error:
-        service = "OpenCaseLaw" if args.command == "collect" else "Apertus"
-        print(f"{service} API returned HTTP {error.code}.", file=sys.stderr)
-        return 1
-    except (OSError, URLError, ValueError) as error:
-        print(error, file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

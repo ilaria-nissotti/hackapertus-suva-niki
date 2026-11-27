@@ -1,6 +1,5 @@
-from contextlib import closing
+from datetime import date
 from io import BytesIO
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -9,25 +8,22 @@ from urllib.error import HTTPError
 
 import app as dashboard
 import conversation as convo
+from conftest import seed_kb
 
 
 class ConversationTests(TestCase):
-    case = "8C_354/2026"
+    docket = "8C_354/2026"
     source = "The court dismissed the appeal because the statutory requirements were not met."
 
     def setUp(self):
         tmp = TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        config = patch.dict(dashboard.app.config, DATABASE=Path(tmp.name) / "test.sqlite")
+        self.case = seed_kb(Path(tmp.name) / "kb.sqlite", self.docket, self.source, score=95, band="high")
+        config = patch.dict(dashboard.app.config, DATABASE=Path(tmp.name) / "review.sqlite",
+                            KB=Path(tmp.name) / "kb.sqlite", TODAY=date(2026, 11, 27))
         config.start()
         self.addCleanup(config.stop)
         self.client = dashboard.app.test_client()
-        with closing(dashboard.connect()) as db, db:
-            dashboard.save_judgment(db, {"docket": self.case, "full_text": self.source})
-            record = db.execute("SELECT * FROM judgments").fetchone()
-            db.execute("INSERT INTO results VALUES (?, ?, ?, ?, NULL, NULL)",
-                       (self.case, "triage", dashboard.version(record, "model"),
-                        json.dumps({"score": 95, "reason": "Statutory accident insurance"})))
         for name, value in [("conversation.model_config", {"LLM_NAME": "model"}),
                             ("conversation.voice_config", ("server-key", "voice"))]:
             mock = patch(name, return_value=value)
@@ -129,10 +125,13 @@ class ConversationTests(TestCase):
         self.assertIsNone(empty["selected"])
         self.assertEqual(empty["rows"], [])
         with patch("app.current_model", return_value="model"):
-            response = self.client.get("/api/dashboard", query_string={"case": self.case, "q": self.case})
+            response = self.client.get("/api/dashboard", query_string={"case": self.case, "q": self.docket})
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         page = response.json
-        self.assertEqual(page["selected"]["docket"], self.case)
+        self.assertEqual(page["selected"]["key"], self.case)
+        self.assertEqual(page["selected"]["docket"], self.docket)
         self.assertEqual(page["selected"]["score"], 95)
+        self.assertTrue(page["selected"]["score_current"])
         self.assertEqual(page["rows"][0]["status"], "Relevant")
+        self.assertEqual(page["window"], ["2026-08-27", "2026-11-27"])
         self.assertNotIn("full_text", page["rows"][0])

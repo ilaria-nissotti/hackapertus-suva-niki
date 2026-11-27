@@ -56,9 +56,22 @@ def window_judgements(repo: Repository, window: Window) -> list[dict[str, Any]]:
 
 
 def score_window(repo: Repository, window: Window, ruleset: RuleSet) -> ScoreRunReport:
-    rep = ScoreRunReport(str(window), str(ruleset.path or "<inline>"), rules_hash(ruleset))
+    return _score_rows(repo, window_judgements(repo, window), ruleset, window)
+
+
+def score_keys(repo: Repository, keys: list[str], ruleset: RuleSet) -> ScoreRunReport:
+    """Score single judgements (e.g. one a reviewer added by hand), whatever their dates."""
+    wanted = set(keys)
+    rows = [r for r in repo.list_judgements() if r["key"] in wanted]
+    return _score_rows(repo, rows, ruleset, None)
+
+
+def _score_rows(repo: Repository, judgements: list[dict[str, Any]], ruleset: RuleSet,
+                window: Window | None) -> ScoreRunReport:
+    rep = ScoreRunReport(str(window) if window else "selected judgements",
+                         str(ruleset.path or "<inline>"), rules_hash(ruleset))
     bands, rows = Counter(), []
-    for row in window_judgements(repo, window):
+    for row in judgements:
         record = features_record(repo, row)
         result = score_record(record, ruleset)
         rows.append({
@@ -70,7 +83,7 @@ def score_window(repo: Repository, window: Window, ruleset: RuleSet) -> ScoreRun
         bands[result.band] += 1
         rep.not_parsed += record["parse_status"] is None
         rep.stale_parses += record["parse_stale"]
-        rep.unknown_publication += window.published_from is not None and not row["publication_date"]
+        rep.unknown_publication += bool(window and window.published_from) and not row["publication_date"]
     repo.save_scores(rows)
     rep.scored, rep.by_band = len(rows), dict(bands)
     return rep

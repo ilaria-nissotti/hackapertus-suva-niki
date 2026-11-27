@@ -115,4 +115,9 @@ class Repository(ABC):
     def list_scores(self) -> list[dict[str, Any]]: ...
 
     @abstractmethod
+    def list_review_rows(self, start: str | None = None, end: str | None = None,
+                         keys: list[str] | None = None) -> list[dict[str, Any]]:
+        """Judgements (by decision date range or keys) with text, parse subject and stored score."""
+
+    @abstractmethod
     def close(self) -> None: ...
