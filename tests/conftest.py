@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from suva.config import load_settings
+from suva.storage import SQLiteRepository
+
+
+def make_settings(tmp_path, **overrides):
+    env = {
+        "LLM_NAME": "swiss-ai/Apertus-v1.5-8B",
+        "LLM_BASE_URL": "https://api.example.test/v1",
+        "LLM_API_KEY": "secret-key",
+        "DATA_DIR": str(tmp_path),
+        "DATABASE_URL": f"sqlite:///{tmp_path / 'kb.sqlite'}",
+        "LLM_CACHE_MODE": "readwrite",
+    }
+    env.update(overrides)
+    return load_settings(environ=env)
+
+
+class FakeCompletions:
+    def __init__(self, reply="Bereit", fail=None):
+        self.calls = []
+        self.reply = reply
+        self.fail = fail
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail:
+            raise self.fail
+        return SimpleNamespace(
+            model=kwargs["model"],
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self.reply))],
+            usage=SimpleNamespace(prompt_tokens=7, completion_tokens=1),
+        )
+
+
+def fake_client(**kw):
+    completions = FakeCompletions(**kw)
+    return SimpleNamespace(chat=SimpleNamespace(completions=completions)), completions
+
+
+@pytest.fixture
+def repo(tmp_path):
+    r = SQLiteRepository(tmp_path / "kb.sqlite")
+    r.migrate()
+    yield r
+    r.close()

@@ -54,6 +54,34 @@ Where it breaks, what you did not test, and known failure modes.
 What a judge needs to get your numbers back: hardware, runtime, seeds, and the
 exact commit.
 
+### Running it
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt && pip install -e .
+cp .env.example .env          # set LLM_NAME, LLM_BASE_URL, LLM_API_KEY
+python -m suva init-db        # create/upgrade the knowledge base (data/kb.sqlite)
+python -m suva llm-ping       # one live call: checks the Apertus endpoint, prints latency/tokens
+pytest                        # offline test suite (no network, fake LLM)
+```
+
+Configuration is environment-only (`.env.example`). `LLM_CACHE_MODE=readonly`
+replays cached Apertus calls without network access (frozen snapshot mode); every
+LLM call is recorded in the append-only `audit_log` table (model, host, prompt
+version, input/output hashes — no prompt text, no keys).
+
+
+To import the supplied summaries and picked-judgement workbooks, run
+`python -m suva import-supplied`. Each successful import replaces the supplied
+dataset together. Once a summary split is frozen, use a fresh database for a
+changed summary corpus.
+
+Run `python -m suva split-examples --manifest split-manifest.json` to save the
+versioned split and source hashes. Pass the same manifest after importing into
+a fresh database to reproduce the holdout. New splits group decisions by docket
+and include each source language when the holdout size allows. Existing complete
+splits keep their original assignments.
+
 
 ## License
 
