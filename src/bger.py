@@ -1,4 +1,4 @@
-"""Shared helpers for the review app: case IDs, config and Apertus chat.
+"""Shared helpers for the review app: config and Apertus chat.
 
 Judgements come from the suva knowledge base (`python -m suva fetch`); `python -m suva
 llm-ping` checks the Apertus endpoint.
@@ -7,7 +7,6 @@ llm-ping` checks the Apertus endpoint.
 from dataclasses import replace
 import os
 from pathlib import Path
-import re
 from urllib.parse import urlsplit
 from openai import APIError
 
@@ -15,7 +14,6 @@ from suva.config import load_settings
 from suva.llm import LLMClient
 
 ROOT = Path(__file__).resolve().parents[1]
-CASE_ID = re.compile(r"\b\d+[A-Z]+_\d+/\d{4}\b")
 
 
 def local_config(*names):
