@@ -257,6 +257,16 @@ def test_dataset_reports_parses_from_an_older_parser(repo, tmp_path):
     assert rep.stale_parses == 1 and load_dataset(out)[0]["parse_stale"]
 
 
+def test_decisions_of_one_docket_share_a_split(repo, tmp_path):
+    add(repo, "8C_8/2025", date(2026, 2, 10), JUDGEMENT)  # train by date
+    add(repo, "8C_8/2025", date(2026, 3, 12), JUDGEMENT)  # test by date, follows its docket
+    add(repo, "8C_9/2026", date(2026, 3, 5), JUDGEMENT)
+    out = tmp_path / "dataset.jsonl"
+    build_dataset(repo, out)
+    assert {r["key"]: r["split"] for r in load_dataset(out)} == {
+        "8C_8/2025@2026-02-10": "train", "8C_8/2025@2026-03-12": "train", "8C_9/2026@2026-03-05": "test"}
+
+
 def test_parse_verdict_accepts_json_inside_text_and_rejects_bad_answers():
     assert parse_verdict('Sure: {"relevance": "High", "reason": "UVG causal link."}') == (
         "high", "UVG causal link.", None)

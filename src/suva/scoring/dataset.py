@@ -6,8 +6,9 @@ docket-only ref matches only when the docket has a single decision in the period
 reported as ambiguous otherwise (same rule as fetch and parse). The example summaries (Export_*.html) are NOT labels; they
 are style examples for summarising.
 
-Split: decisions on or after `test_from` form the test set (time-based, closest to
-real use: rules built on the past, applied to new judgements).
+Split: dockets whose first decision in the period is on or after `test_from` form the
+test set (time-based, closest to real use: rules built on the past, applied to new
+judgements). All decisions of one docket stay in the same split.
 """
 
 from __future__ import annotations
@@ -81,7 +82,18 @@ def match_labels(repo: Repository, rows: list[dict[str, Any]]) -> LabelMatch:
     return result
 
 
-def build_record(repo: Repository, row: dict[str, Any], positives: set[str], test_from: date) -> dict[str, Any]:
+def docket_splits(rows: list[dict[str, Any]], test_from: date) -> dict[str, str]:
+    """train/test per docket, from the docket's earliest decision date (undated decisions: train)."""
+    first: dict[str, str] = {}
+    for row in rows:
+        d = row["decision_date"]
+        if d and (row["docket"] not in first or d < first[row["docket"]]):
+            first[row["docket"]] = d
+    return {row["docket"]: "test" if row["docket"] in first and date.fromisoformat(first[row["docket"]]) >= test_from
+            else "train" for row in rows}
+
+
+def build_record(repo: Repository, row: dict[str, Any], positives: set[str], split: str) -> dict[str, Any]:
     j = repo.get_judgement(row["key"]) or {}
     parse = repo.get_parse(row["key"]) or {}
     passages = repo.list_passages(row["key"])
@@ -98,7 +110,7 @@ def build_record(repo: Repository, row: dict[str, Any], positives: set[str], tes
         "chamber": row["chamber_prefix"],
         "language": row["language"],
         "relevant": row["key"] in positives,
-        "split": "test" if decision and date.fromisoformat(decision) >= test_from else "train",
+        "split": split,
         "parse_status": parse.get("status"),
         "parse_stale": bool(parse) and (parse.get("parser_version") != PARSER_VERSION
                                         or parse.get("text_hash") != (sha256(j["text"]) if j.get("text") else None)),
@@ -123,11 +135,12 @@ def build_dataset(
     rows = repo.list_judgements(start=start.isoformat(), end=end.isoformat())
     labels = match_labels(repo, rows)
     positives = labels.keys
+    splits_by_docket = docket_splits(rows, test_from)
     splits, status = Counter(), Counter()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
         for row in rows:
-            rec = build_record(repo, row, positives, test_from)
+            rec = build_record(repo, row, positives, splits_by_docket[row["docket"]])
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             rep.records += 1
             rep.relevant += rec["relevant"]
