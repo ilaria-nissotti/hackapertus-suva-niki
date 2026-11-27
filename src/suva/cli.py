@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from dataclasses import replace
+from pathlib import Path
 
 from suva.config import load_settings
 from suva.storage import open_repository
@@ -23,8 +24,6 @@ def cmd_init_db(args: argparse.Namespace) -> int:
 
 def cmd_import_supplied(args: argparse.Namespace) -> int:
     """Parse judgements/ (exports + xlsx) into the KB. Safe to re-run."""
-    from pathlib import Path
-
     from suva.config import REPO_ROOT
     from suva.ingest.importer import import_supplied
 
@@ -48,7 +47,14 @@ def cmd_split_examples(args: argparse.Namespace) -> int:
 
     repo = open_repository(load_settings())
     try:
-        print(json.dumps(apply_split(repo, args.n_eval), indent=2))
+        path = args.manifest
+        exists = path is not None and path.exists()
+        manifest = json.loads(path.read_text(encoding="utf-8")) if exists else None
+        result = apply_split(repo, args.n_eval, manifest)
+        if path is not None and not exists:
+            with path.open("x", encoding="utf-8") as output:
+                output.write(json.dumps(repo.get_example_manifest(), indent=2, sort_keys=True) + "\n")
+        print(json.dumps(result, indent=2))
     finally:
         repo.close()
     return 0
@@ -88,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_import_supplied)
 
     p = sub.add_parser("split-examples", help="freeze the few-shot / eval split (never moves an assigned one)")
-    p.add_argument("--n-eval", type=int, default=15)
+    p.add_argument("--n-eval", type=int, default=15, help="number of docket groups to reserve")
+    p.add_argument("--manifest", type=Path, help="write or replay a split manifest JSON file")
     p.set_defaults(func=cmd_split_examples)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")

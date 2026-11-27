@@ -32,20 +32,31 @@ class Repository(ABC):
     # --- supplied data (step 2) -------------------------------------------
     @abstractmethod
     def upsert_example(self, row: dict[str, Any]) -> None:
-        """Insert/update an example summary by docket. Never changes an assigned split."""
+        """Insert/update an example summary by decision identity. Protects assigned examples."""
 
     @abstractmethod
     def list_examples(self, split: str | None = None) -> list[dict[str, Any]]: ...
 
     @abstractmethod
-    def set_example_split(self, docket: str, split: str) -> None:
-        """Assign fewshot/eval. Raises if the docket already has a different split."""
+    def set_example_split(self, decision_id: str, split: str) -> None:
+        """Assign fewshot/eval. Raises if the decision already has a different split."""
 
     @abstractmethod
     def upsert_known_positive(self, row: dict[str, Any]) -> None: ...
 
     @abstractmethod
     def list_known_positives(self, court: str | None = None) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def replace_supplied(self, examples: list[dict], positives: list[dict]) -> None:
+        """Atomically replace the supplied-data snapshot."""
+
+    @abstractmethod
+    def freeze_examples(self, manifest: dict) -> dict[str, int]:
+        """Atomically validate and persist a split manifest."""
+
+    @abstractmethod
+    def get_example_manifest(self) -> dict | None: ...
 
     @abstractmethod
     def close(self) -> None: ...

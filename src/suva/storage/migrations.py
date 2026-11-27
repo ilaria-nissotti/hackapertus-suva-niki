@@ -56,4 +56,18 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "003_decision_identity_and_split_manifest",
+        """
+        ALTER TABLE example_summaries RENAME COLUMN docket TO decision_id;
+        ALTER TABLE example_summaries ADD COLUMN docket TEXT;
+        UPDATE example_summaries SET docket = decision_id;
+        UPDATE example_summaries SET decision_id = docket || '@' || decision_date WHERE decision_date IS NOT NULL;
+        CREATE INDEX example_summaries_docket ON example_summaries (docket);
+        CREATE TABLE example_split_manifest (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload TEXT NOT NULL
+        );
+        """,
+    ),
 ]

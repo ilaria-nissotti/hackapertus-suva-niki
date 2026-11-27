@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -20,5 +21,35 @@ def test_import_supplied_counts_and_rerun(repo):
     assert rep2.known_positives == 83 and len(repo.list_known_positives()) == 83
 
     kp = {r["ref"]: r for r in repo.list_known_positives()}
-    assert kp["8C_458/2025"]["in_xlsx"] == 1 and kp["8C_458/2025"]["in_exports"] == 1
-    assert kp["8C_458/2025"]["notes"]  # records the prefix fix
+    assert kp["8C_458/2025@2025-11-18"]["in_xlsx"] == 1 and kp["8C_458/2025@2025-11-18"]["in_exports"] == 1
+    assert kp["8C_458/2025@2025-11-18"]["notes"]  # records the prefix fix
+
+
+def test_ambiguous_docket_and_atomic_replacement(repo, tmp_path, monkeypatch):
+    from datetime import date
+
+    from suva.ingest import importer
+    from suva.ingest.exports import ExampleSummary
+    from suva.ingest.picks import Pick
+
+    docket = "8C_1/2025"
+    examples = [
+        ExampleSummary(docket, date(2025, 1, day), "title", "de", "de", "fr", None, None, None, f"{day}.html")
+        for day in (1, 2)
+    ]
+    (tmp_path / "BG_Urteile_test.xlsx").touch()
+    monkeypatch.setattr(importer, "parse_export_dir", lambda _: examples)
+    monkeypatch.setattr(importer, "read_picks", lambda *_: [
+        Pick(docket, docket, "bger", None, None),
+    ])
+    result = import_supplied(repo, tmp_path)
+    assert (result.known_positives, result.unresolved, result.in_both) == (3, 1, 0)
+    assert len(repo.list_examples()) == 2
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.replace_supplied([], [{"ref": "broken"}])
+    assert len(repo.list_examples()) == 2
+    assert len(repo.list_known_positives()) == 3
+
+    with pytest.raises(ValueError, match="does not exist"):
+        import_supplied(repo, tmp_path / "missing")

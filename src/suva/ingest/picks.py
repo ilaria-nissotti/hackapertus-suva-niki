@@ -67,13 +67,23 @@ def read_picks(xlsx: Path, known_dockets: set[str] | None = None) -> list[Pick]:
     known = known_dockets or set()
     picks = []
     for _, row in df.iterrows():
-        raw = " ".join(str(row["Urteilsnummer / Titel"]).split())
+        title = row["Urteilsnummer / Titel"]
+        if pd.isna(title) or not str(title).strip():
+            continue
+        raw = " ".join(str(title).split())
         docket, court, notes = normalise_pick(raw, known)
         created = row.get("Erstellt")
+        parsed = pd.NaT
+        if isinstance(created, (str, datetime)):
+            parsed = pd.to_datetime(created, format="ISO8601", errors="coerce")
+            if pd.isna(parsed) and isinstance(created, str):
+                parsed = pd.to_datetime(created, dayfirst=True, errors="coerce")
+        if pd.notna(created) and pd.isna(parsed):
+            notes.append("could not parse Erstellt date")
         picks.append(Pick(
             raw=raw, docket=docket, court=court,
             quarter=str(row["Jahr / Quartal"]).strip() if pd.notna(row["Jahr / Quartal"]) else None,
-            summary_created_at=created.to_pydatetime() if pd.notna(created) else None,
+            summary_created_at=parsed.to_pydatetime() if pd.notna(parsed) else None,
             notes=notes,
         ))
     return picks

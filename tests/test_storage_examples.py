@@ -18,8 +18,10 @@ def test_upsert_example_roundtrip_and_update(repo):
 def test_reimport_keeps_frozen_split(repo):
     repo.upsert_example(ex())
     repo.set_example_split("8C_1/2025", "eval")
-    repo.upsert_example(ex(text_de="re-import"))
-    assert repo.list_examples(split="eval")[0]["text_de"] == "re-import"
+    repo.upsert_example(ex())
+    with pytest.raises(ValueError, match="frozen"):
+        repo.upsert_example(ex(text_de="re-import"))
+    assert repo.list_examples(split="eval")[0]["text_de"] == "de"
 
 
 def test_split_cannot_move(repo):

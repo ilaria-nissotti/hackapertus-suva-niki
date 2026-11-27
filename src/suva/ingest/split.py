@@ -1,28 +1,18 @@
-"""Frozen few-shot / eval split of Suva's example summaries.
-
-Decided in step 2, before any prompt work, so the summary prompts can never be
-tuned on the evaluation set:
-- eval: N_EVAL examples (default 15) used only to grade our generated summaries
-- fewshot: the rest; the only pool Apertus may copy style from
-
-Deterministic: examples are stratified by (decision language, author) and ordered
-by sha256(SEED + docket); the eval quota is spread over strata by largest
-remainder. Same input files -> same split on any machine.
-"""
+"""Create and replay versioned manifests for the supplied summary holdout."""
 
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from suva.hashing import sha256
 from suva.storage.base import Repository
 
-SEED = "examples-split-v1"
+SEED = "examples-split-v2"
 N_EVAL = 15
 
 
-def compute_split(examples: list[dict], n_eval: int = N_EVAL) -> dict[str, str]:
+def _stratified_split(examples: list[dict], n_eval: int) -> dict[str, str]:
     strata: dict[tuple, list[str]] = defaultdict(list)
     for e in examples:
         strata[(e.get("language"), e.get("author"))].append(e["docket"])
@@ -44,19 +34,62 @@ def compute_split(examples: list[dict], n_eval: int = N_EVAL) -> dict[str, str]:
     return split
 
 
-def apply_split(repo: Repository, n_eval: int = N_EVAL) -> dict[str, int]:
-    """Assign the split to every example that has none yet; never moves an assigned one."""
-    examples = repo.list_examples()
-    split = compute_split(examples, n_eval)
-    assigned = 0
-    for e in examples:
-        if e["split"] is None:
-            repo.set_example_split(e["docket"], split[e["docket"]])
-            assigned += 1
-        elif e["split"] != split[e["docket"]]:
-            # frozen earlier under different inputs: keep it, but make it visible
-            print(f"warning: {e['docket']} frozen as {e['split']}, recomputed {split[e['docket']]}")
-    counts = {"fewshot": 0, "eval": 0}
-    for e in repo.list_examples():
-        counts[e["split"]] += 1
-    return {"newly_assigned": assigned, **counts}
+def compute_split(examples: list[dict], n_eval: int = N_EVAL) -> dict[str, str]:
+    # Keep every dated decision for the same docket in one group.
+    representatives = {}
+    for row in sorted(examples, key=lambda row: row.get("decision_id", row["docket"])):
+        representatives.setdefault(row["docket"], row)
+    groups = list(representatives.values())
+    split = _stratified_split(groups, n_eval)
+
+    # Give each source language representation when the requested size allows it.
+    languages = {row["language"] for row in groups if row.get("language")}
+    eval_languages = Counter(row.get("language") for row in groups if split[row["docket"]] == "eval")
+    if n_eval >= len(languages):
+        ordered = sorted(groups, key=lambda row: sha256(SEED + row["docket"]))
+        for language in sorted(languages - eval_languages.keys()):
+            incoming = next(row for row in ordered if row.get("language") == language)
+            outgoing = next(row for row in reversed(ordered) if split[row["docket"]] == "eval"
+                            and (row.get("language") is None or eval_languages[row["language"]] > 1))
+            split[incoming["docket"]] = "eval"
+            split[outgoing["docket"]] = "fewshot"
+            eval_languages[outgoing.get("language")] -= 1
+            eval_languages[language] += 1
+    return {row.get("decision_id", row["docket"]): split[row["docket"]] for row in examples}
+
+
+def _source_hashes(examples: list[dict]) -> dict[str, str]:
+    return {
+        row["decision_id"]: sha256({key: val for key, val in row.items() if key not in ("split", "imported_at")})
+        for row in examples
+    }
+
+
+def validate_manifest(manifest: dict, examples: list[dict]) -> None:
+    assignments = manifest.get("assignments", {})
+    hashes = _source_hashes(examples)
+    if manifest.get("version") not in (1, 2) or manifest.get("source_hashes") != hashes:
+        raise ValueError("Split manifest version or source hashes do not match the imported corpus")
+    if assignments.keys() != hashes.keys() or set(assignments.values()) != {"eval", "fewshot"}:
+        raise ValueError("Split manifest must assign every decision to an evaluation or few-shot group")
+    grouped = defaultdict(set)
+    for row in examples:
+        grouped[row["docket"]].add(assignments[row["decision_id"]])
+    if any(len(splits) > 1 for splits in grouped.values()):
+        raise ValueError("Split manifest separates decisions with the same docket")
+
+
+def apply_split(repo: Repository, n_eval: int = N_EVAL, manifest: dict | None = None) -> dict[str, int]:
+    if manifest is None:
+        manifest = repo.get_example_manifest()
+    if manifest is None:
+        examples = repo.list_examples()
+        legacy = {row["decision_id"]: row["split"] for row in examples if row["split"]}
+        if legacy and len(legacy) != len(examples):
+            raise ValueError("Legacy split is incomplete. Build a new split in a fresh database")
+        manifest = {
+            "version": 1 if legacy else 2,
+            "source_hashes": _source_hashes(examples),
+            "assignments": legacy or compute_split(examples, n_eval),
+        }
+    return repo.freeze_examples(manifest)

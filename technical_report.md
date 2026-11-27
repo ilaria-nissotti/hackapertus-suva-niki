@@ -71,6 +71,18 @@ LLM call is recorded in the append-only `audit_log` table (model, host, prompt
 version, input/output hashes — no prompt text, no keys).
 
 
+To import the supplied summaries and picked-judgement workbooks, run
+`python -m suva import-supplied`. Each successful import replaces the supplied
+dataset together. Once a summary split is frozen, use a fresh database for a
+changed summary corpus.
+
+Run `python -m suva split-examples --manifest split-manifest.json` to save the
+versioned split and source hashes. Pass the same manifest after importing into
+a fresh database to reproduce the holdout. New splits group decisions by docket
+and include each source language when the holdout size allows. Existing complete
+splits keep their original assignments.
+
+
 ## License
 
 Creative Commons Attribution 4.0 (CC-BY-4.0). All HackApertus projects are open-sourced.

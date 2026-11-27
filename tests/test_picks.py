@@ -37,3 +37,20 @@ def test_supplied_xlsx():
     assert "8C_458/2025" in dockets and len(dockets) == 59
     assert {p.quarter for p in picks} == {"2025 Q4", "2026 Q1"}
     assert all(p.summary_created_at for p in picks)
+
+
+def test_text_dates_and_blank_rows(tmp_path):
+    import pandas as pd
+
+    from suva.ingest.picks import read_picks
+
+    path = tmp_path / "picks.xlsx"
+    pd.DataFrame({
+        "Urteilsnummer / Titel": ["8C_1/2025", "8C_2/2025", None],
+        "Jahr / Quartal": ["2025 Q1"] * 3,
+        "Erstellt": ["04.03.2025", "unknown", None],
+    }).to_excel(path, index=False)
+    dated, invalid = read_picks(path)
+    assert dated.summary_created_at.date().isoformat() == "2025-03-04"
+    assert invalid.summary_created_at is None
+    assert invalid.notes == ["could not parse Erstellt date"]

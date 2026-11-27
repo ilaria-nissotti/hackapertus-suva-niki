@@ -44,6 +44,10 @@ SHOW_DOCUMENT_URL = (
 )
 
 
+def decision_id(docket: str, decision_date: date | str | None) -> str:
+    return f"{docket}@{decision_date}" if decision_date else docket
+
+
 @dataclass
 class ExampleSummary:
     docket: str
@@ -57,6 +61,10 @@ class ExampleSummary:
     aza_docid: str | None  # e.g. 18-11-2025-8C_458-2025
     source_file: str
     notes: list[str] = field(default_factory=list)
+
+    @property
+    def decision_id(self) -> str:
+        return decision_id(self.docket, self.decision_date)
 
     @property
     def bger_url(self) -> str | None:

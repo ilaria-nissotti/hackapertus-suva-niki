@@ -7,13 +7,6 @@ from suva.ingest.split import apply_split, compute_split
 
 JUDGEMENTS = Path(__file__).resolve().parents[1] / "judgements"
 
-# Pinned: if this changes, the eval set moved and earlier scores are not comparable.
-EXPECTED_EVAL = (
-    "4A_106/2025 8C_129/2025 8C_172/2025 8C_180/2025 8C_185/2025 8C_311/2025 8C_314/2025 "
-    "8C_318/2025 8C_330/2025 8C_351/2025 8C_450/2025 8C_508/2025 8C_531/2025 8C_607/2024 9C_382/2025"
-).split()
-
-
 def fake(n, lang="de", author="A"):
     return [{"docket": f"8C_{i}/2025", "language": lang, "author": author} for i in range(n)]
 
@@ -41,5 +34,28 @@ def test_bad_size():
 def test_supplied_split_is_pinned_and_frozen(repo):
     import_supplied(repo, JUDGEMENTS)
     assert apply_split(repo) == {"newly_assigned": 55, "fewshot": 40, "eval": 15}
-    assert [e["docket"] for e in repo.list_examples(split="eval")] == EXPECTED_EVAL
+    assert {e["language"] for e in repo.list_examples(split="eval")} == {"de", "fr", "it"}
+    manifest = repo.get_example_manifest()
+    assert manifest["version"] == 2
+    assert apply_split(repo, manifest=manifest)["newly_assigned"] == 0
+    from suva.storage import SQLiteRepository
+
+    rebuilt = SQLiteRepository(":memory:")
+    try:
+        rebuilt.migrate()
+        import_supplied(rebuilt, JUDGEMENTS)
+        assert apply_split(rebuilt, manifest=manifest)["eval"] == 15
+        assert rebuilt.get_example_manifest() == manifest
+    finally:
+        rebuilt.close()
     assert apply_split(repo)["newly_assigned"] == 0  # re-run changes nothing
+
+
+def test_same_docket_decisions_share_a_split():
+    examples = fake(8)
+    examples.extend([
+        {**examples[0], "decision_id": "8C_0/2025@2025-01-01"},
+        {**examples[0], "decision_id": "8C_0/2025@2025-01-02"},
+    ])
+    assignments = compute_split(examples, 3)
+    assert assignments["8C_0/2025@2025-01-01"] == assignments["8C_0/2025@2025-01-02"]
