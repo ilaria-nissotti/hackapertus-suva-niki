@@ -426,11 +426,11 @@ def add_case():
                 key = keys[0]
         with closing(connect()) as db, db:
             db.execute("INSERT OR IGNORE INTO review_cases (case_key) VALUES (?)", (key,))
+    except (OSError, UnicodeDecodeError):
+        return jump(message="Could not add that judgment. Upload a UTF-8 text file.")
     except ValueError as exc:
         message = str(exc) if str(exc) else "Could not add that judgment."
         return jump(message=message)
-    except (OSError, UnicodeDecodeError):
-        return jump(message="Could not add that judgment. Upload a UTF-8 text file.")
     return jump(key, "Judgment added.")
 
 
