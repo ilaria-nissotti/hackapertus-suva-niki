@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,13 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 CACHE_MODES = ("readwrite", "readonly", "off")
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+
+def configure_logging(environ: dict[str, str] | None = None) -> None:
+    """Log `event key=value` lines to stderr at LOG_LEVEL (default INFO). Never log secrets or texts."""
+    level = (environ if environ is not None else os.environ).get("LOG_LEVEL", "INFO").strip().upper()
+    logging.basicConfig(level=level if level in logging.getLevelNamesMapping() else "INFO", format=LOG_FORMAT)
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ import httpx
 USER_AGENT = "suva-bger-hackathon/0.1 (HackApertus research prototype; polite, 1 req/2s per host)"
 MIN_INTERVAL = 2.0
 RETRY_STATUS = {429, 500, 502, 503, 504}
+log = logging.getLogger(__name__)
 
 
 class Blocked(RuntimeError):
@@ -49,12 +51,18 @@ class PoliteClient:
         for attempt in count():
             try:
                 resp = self._client.request(method, url, **kw)
-            except httpx.TransportError:
+            except httpx.TransportError as exc:
+                host = httpx.URL(url).host
                 if attempt >= self.retries:
+                    log.error("http_gave_up method=%s host=%s attempts=%d error=%s", method, host, attempt + 1,
+                              type(exc).__name__)
                     raise
+                log.warning("http_retry method=%s host=%s attempt=%d error=%s", method, host, attempt + 1,
+                            type(exc).__name__)
                 self.sleep(self.min_interval * 2 ** attempt)
                 continue
             if resp.status_code == 403:
+                log.error("http_blocked method=%s host=%s status=403", method, resp.request.url.host)
                 raise Blocked(f"403 from {resp.request.url.host}")
             if resp.status_code in RETRY_STATUS and attempt < self.retries:
                 retry_after = resp.headers.get("Retry-After", "")
@@ -67,9 +75,14 @@ class PoliteClient:
                         if retry_at.tzinfo is not None:
                             delay = max(delay, (retry_at - datetime.now(timezone.utc)).total_seconds())
                     except (ValueError, OverflowError):
-                        pass
+                        log.debug("http_retry_after_unparsed host=%s", resp.request.url.host)
+                log.warning("http_retry method=%s host=%s attempt=%d status=%d delay_s=%.1f", method,
+                            resp.request.url.host, attempt + 1, resp.status_code, delay)
                 self.sleep(delay)
                 continue
+            if resp.is_error:
+                log.error("http_failed method=%s host=%s status=%d attempts=%d", method, resp.request.url.host,
+                          resp.status_code, attempt + 1)
             resp.raise_for_status()
             return resp
 

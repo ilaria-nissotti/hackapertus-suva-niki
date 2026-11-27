@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ from typing import Any
 from suva.config import Settings
 from suva.hashing import sha256
 from suva.storage.base import AuditEntry, Repository
+
+log = logging.getLogger(__name__)
 
 
 class CacheMiss(RuntimeError):
@@ -141,6 +144,9 @@ class LLMClient:
                 cached=cached, latency_ms=latency_ms, usage=response.get("usage", {}),
             )
         except Exception as exc:
+            # Never log messages, prompts or provider error text: only what identifies the call.
+            log.warning("llm_call_failed prompt_version=%s host=%s model=%s input_hash=%s error=%s",
+                        prompt_version, self.settings.llm_host, model, input_hash[:12], type(exc).__name__)
             self._audit(model, host=self.settings.llm_host, prompt_version=prompt_version, input_hash=input_hash,
                         error="cache_miss_readonly" if isinstance(exc, CacheMiss) else type(exc).__name__)
             raise

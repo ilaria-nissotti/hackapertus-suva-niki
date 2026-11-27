@@ -9,7 +9,7 @@ from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
-from suva.config import REPO_ROOT, load_settings
+from suva.config import REPO_ROOT, configure_logging, load_settings
 from suva.storage import open_repository
 
 
@@ -350,6 +350,7 @@ def cmd_llm_ping(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging()
     parser = argparse.ArgumentParser(prog="suva")
     sub = parser.add_subparsers(dest="command", required=True)
 

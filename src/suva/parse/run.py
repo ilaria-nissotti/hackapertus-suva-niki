@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 
@@ -11,6 +12,7 @@ from suva.parse.segment import PARSER_VERSION, segment
 from suva.sources.base import parse_iso_date
 from suva.storage.base import AuditEntry, Repository
 
+log = logging.getLogger(__name__)
 WATCH_PREFIXES = ("8C", "9C")  # accident / social insurance chambers: failures here matter most
 
 
@@ -62,6 +64,7 @@ def parse_all(repo: Repository, force: bool = False, *, key: str | None = None) 
             if not repo.save_parse(seg, cits, text_hash):
                 status["stale"] += 1
                 issues["text_changed_during_parse"] += 1
+                log.warning("parse_stale key=%s reason=text_changed_during_parse", j["key"])
                 continue
             rep.parsed += 1
             rep.passages += len(seg.passages)
@@ -76,6 +79,8 @@ def parse_all(repo: Repository, force: bool = False, *, key: str | None = None) 
             if (j["chamber_prefix"] or "") in WATCH_PREFIXES:
                 rep.watched_not_ok.append(label)
     rep.status, rep.issues = dict(status), dict(issues)
+    log.info("parse_done judgements=%d parsed=%d skipped=%d status=%s picks_not_ok=%d", rep.judgements,
+             rep.parsed, rep.skipped_unchanged, rep.status, len(rep.picks_not_ok))
     repo.append_audit(AuditEntry(kind="parse_run", actor="pipeline", payload={
         k: v for k, v in rep.as_dict().items() if k not in ("picks_not_ok", "watched_not_ok")
     } | {"picks_not_ok": len(rep.picks_not_ok), "watched_not_ok": len(rep.watched_not_ok)}))

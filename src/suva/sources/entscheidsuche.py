@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -21,6 +22,7 @@ SOURCE = "entscheidsuche"
 SEARCH_URL = "https://entscheidsuche.ch/_search.php"
 PAGE_SIZE = 1000
 SAFE_ID = re.compile(r"^[A-Za-z0-9_.\-]+$")
+log = logging.getLogger(__name__)
 
 
 class SourceResponseError(RuntimeError):
@@ -117,8 +119,10 @@ def load_judgement(client: PoliteClient, rec: SourceRecord, cache_dir: Path) -> 
     path = cache_dir / f"{rec.source_id}.html"
     try:
         return JudgementDocument(path, _judgement_text(path.read_text(encoding="utf-8"), rec))
-    except (FileNotFoundError, ValueError):
-        pass
+    except FileNotFoundError:
+        log.debug("html_cache_miss source_id=%s", rec.source_id)
+    except ValueError as exc:
+        log.info("html_cache_invalid source_id=%s reason=%s", rec.source_id, exc)
 
     html = client.get(rec.html_url, follow_redirects=False).text
     text = _judgement_text(html, rec)

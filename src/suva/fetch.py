@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from contextlib import closing, nullcontext
 from dataclasses import asdict, dataclass, field, replace
@@ -17,6 +18,8 @@ from suva.sources.base import SourceRecord, parse_iso_date
 from suva.sources.quality import usable_text
 from suva.storage.base import AuditEntry, Repository
 from suva.windows import Window
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -103,6 +106,7 @@ class _FetchRun:
         except (OSError, httpx.HTTPError, ArrowException) as exc:
             progress["status"] = "failed"
             self.report.errors.append(f"opencaselaw: {exc}")
+            log.error("fetch_source_failed source=opencaselaw error=%s detail=%s", type(exc).__name__, exc)
         return publications
 
     def collect_entscheidsuche(self, client: PoliteClient, publications: dict[str, date]) -> None:
@@ -129,6 +133,8 @@ class _FetchRun:
         except (Blocked, httpx.HTTPError, entscheidsuche.SourceResponseError) as exc:
             progress["status"] = "blocked" if isinstance(exc, Blocked) else "failed"
             self.report.errors.append(f"entscheidsuche listing: {exc}")
+            log.error("fetch_source_failed source=entscheidsuche stage=listing status=%s error=%s detail=%s",
+                      progress["status"], type(exc).__name__, exc)
 
     def match_picks(self) -> list[tuple[str, str]]:
         by_docket = defaultdict(list)
@@ -172,9 +178,11 @@ class _FetchRun:
             except Blocked as exc:
                 progress["status"] = "blocked"
                 self.report.errors.append(f"entscheidsuche HTML: {exc}")
+                log.error("fetch_source_failed source=entscheidsuche stage=html status=blocked key=%s", key)
                 continue
             except (httpx.HTTPError, OSError, ValueError) as exc:
                 self.report.errors.append(f"entscheidsuche HTML {key}: {exc}")
+                log.warning("fetch_html_failed key=%s error=%s detail=%s", key, type(exc).__name__, exc)
                 continue
             if needs_text:
                 self.record(replace(attachment, text=document.text), in_window=False)
@@ -203,6 +211,10 @@ class _FetchRun:
         report.picks_without_text = [ref for ref, key in picks if not self.decisions[key].has_text]
         report.picks_found = len(picks) - len(report.picks_without_text)
         self.repo.append_audit(AuditEntry(kind="fetch_run", actor="pipeline", payload=report.as_dict()))
+        log.info("fetch_done window=%s sightings=%d new=%d errors=%d picks_missing=%d picks_ambiguous=%d "
+                 "picks_without_text=%d still_without_text=%d", report.window, len(report.sightings),
+                 report.new_judgements, len(report.errors), len(report.picks_missing), len(report.picks_ambiguous),
+                 len(report.picks_without_text), len(report.still_without_text))
         return report
 
 
@@ -218,6 +230,8 @@ def fetch(
     refresh_opencaselaw: bool = False,
     client: PoliteClient | None = None,
 ) -> FetchReport:
+    log.info("fetch_start window=%s start=%s end=%s published_from=%s entscheidsuche=%s", window.name,
+             window.start, window.end, window.published_from, use_entscheidsuche)
     run = _FetchRun(repo, window, include_picks)
     publications = run.collect_opencaselaw(raw_dir, refresh_opencaselaw)
     run.report.source_runs[entscheidsuche.SOURCE] = {"status": "disabled", "ranges": []}
