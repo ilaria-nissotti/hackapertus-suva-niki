@@ -271,6 +271,53 @@ class SQLiteRepository(Repository):
             self.conn.execute("UPDATE judgements SET html_path = ?, updated_at = ? WHERE key = ?",
                               (path, utcnow(), key))
 
+    # --- passages + citations (step 4) ------------------------------------
+    def save_parse(self, seg, citations, text_hash) -> None:
+        n_cit = sum(len(v) for v in citations.values())
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM citations WHERE pid IN (SELECT pid FROM passages WHERE key = ?)", (seg.key,))
+            self.conn.execute("DELETE FROM passages WHERE key = ?", (seg.key,))
+            self.conn.executemany(
+                'INSERT INTO passages (pid, key, ord, kind, number, text, start, "end") VALUES (?,?,?,?,?,?,?,?)',
+                [(p.pid, seg.key, i, p.kind, p.number, p.text, p.start, p.end) for i, p in enumerate(seg.passages)],
+            )
+            self.conn.executemany(
+                "INSERT INTO citations (pid, kind, canonical, raw, law, article, consideration, start, \"end\")"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                [(pid, c.kind, c.canonical, c.raw, c.law, c.article, c.consideration, c.start, c.end)
+                 for pid, cs in citations.items() for c in cs],
+            )
+            self.conn.execute(
+                "INSERT OR REPLACE INTO parses (key, status, issues, parser_version, text_hash, chamber,"
+                " parties, subject, passages, citations, parsed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (seg.key, seg.status, json.dumps(seg.issues), seg.parser_version, text_hash, seg.chamber,
+                 seg.parties, seg.subject, len(seg.passages), n_cit, utcnow()),
+            )
+
+    def get_parse(self, key: str) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM parses WHERE key = ?", (key,)).fetchone()
+        return {**dict(row), "issues": json.loads(row["issues"])} if row else None
+
+    def list_passages(self, key: str) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM passages WHERE key = ? ORDER BY ord", (key,))]
+
+    def list_citations(self, key: str) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT c.* FROM citations c JOIN passages p ON p.pid = c.pid WHERE p.key = ?"
+            " ORDER BY p.ord, c.start", (key,))]
+
+    def parse_summary(self) -> dict[str, Any]:
+        status = dict(self.conn.execute("SELECT status, count(*) FROM parses GROUP BY status").fetchall())
+        issues: dict[str, int] = {}
+        for (raw,) in self.conn.execute("SELECT issues FROM parses"):
+            for i in json.loads(raw):
+                issues[i] = issues.get(i, 0) + 1
+        unparsed = self.conn.execute(
+            "SELECT count(*) FROM judgements j LEFT JOIN parses p ON p.key = j.key WHERE p.key IS NULL"
+        ).fetchone()[0]
+        return {"status": status, "issues": issues, "unparsed": unparsed}
+
     def close(self) -> None:
         self.conn.close()
 

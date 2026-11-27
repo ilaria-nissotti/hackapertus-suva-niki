@@ -89,5 +89,23 @@ class Repository(ABC):
     @abstractmethod
     def set_html_path(self, key: str, path: str) -> None: ...
 
+    # --- passages + citations (step 4) ------------------------------------
+    @abstractmethod
+    def save_parse(self, seg: Any, citations: dict[str, list[Any]], text_hash: str | None) -> None:
+        """Store a Segmentation and its citations per passage id, replacing any earlier parse."""
+
+    @abstractmethod
+    def get_parse(self, key: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    def list_passages(self, key: str) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def list_citations(self, key: str) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def parse_summary(self) -> dict[str, Any]:
+        """Counts by status and by issue over all parsed judgements."""
+
     @abstractmethod
     def close(self) -> None: ...

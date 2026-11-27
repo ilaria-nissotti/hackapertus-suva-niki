@@ -104,4 +104,48 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "005_passages_and_citations",
+        """
+        -- Result of splitting one judgement's text (step 4). Re-run replaces it.
+        CREATE TABLE parses (
+            key            TEXT PRIMARY KEY REFERENCES judgements (key),
+            status         TEXT NOT NULL CHECK (status IN ('ok', 'partial', 'failed')),
+            issues         TEXT NOT NULL DEFAULT '[]',
+            parser_version TEXT NOT NULL,
+            text_hash      TEXT,              -- sha256 of the text that was parsed
+            chamber        TEXT,              -- from the decision's own header
+            parties        TEXT,
+            subject        TEXT,
+            passages       INTEGER NOT NULL,
+            citations      INTEGER NOT NULL,
+            parsed_at      TEXT NOT NULL
+        );
+        CREATE TABLE passages (
+            pid     TEXT PRIMARY KEY,         -- '8C_129/2025@2025-11-11#E.3.2'
+            key     TEXT NOT NULL REFERENCES judgements (key),
+            ord     INTEGER NOT NULL,         -- order within the decision
+            kind    TEXT NOT NULL,            -- header | facts | reasons | consideration | dispositiv | full
+            number  TEXT,                     -- '3.2' for considerations
+            text    TEXT NOT NULL,
+            start   INTEGER NOT NULL,         -- char offsets in judgements.text
+            "end"   INTEGER NOT NULL
+        );
+        CREATE INDEX passages_key ON passages (key, ord);
+        CREATE TABLE citations (
+            pid           TEXT NOT NULL REFERENCES passages (pid),
+            kind          TEXT NOT NULL,      -- statute | bge | judgement
+            canonical     TEXT NOT NULL,      -- 'Art. 6 Abs. 2 UVG' | 'BGE 134 V 109' | '8C_1/2025'
+            raw           TEXT NOT NULL,
+            law           TEXT,
+            article       TEXT,
+            consideration TEXT,
+            start         INTEGER NOT NULL,   -- char offsets within the passage text
+            "end"         INTEGER NOT NULL
+        );
+        CREATE INDEX citations_pid ON citations (pid);
+        CREATE INDEX citations_canonical ON citations (canonical);
+        CREATE INDEX citations_law ON citations (law);
+        """,
+    ),
 ]
