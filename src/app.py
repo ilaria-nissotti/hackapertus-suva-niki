@@ -186,11 +186,25 @@ def process(key, kind, *, record=None, config=None):
         return payload is not None
 
 
+JOB_CRASHED = "The summary job failed unexpectedly. Try again."
+
+
 def run_summary_job(key, kind):
     try:
         return process(key, kind)
     except Exception as exc:
         app.logger.error("summary_job_crashed case=%s kind=%s error=%s", key, kind, type(exc).__name__)
+        try:  # record the failure where the dashboard looks, so the browser shows it instead of nothing
+            record = load_record(key)
+            if record is not None:
+                with closing(connect()) as db, db:
+                    db.execute("""INSERT INTO results (case_key, kind, version, payload, error)
+                        VALUES (?, ?, ?, NULL, ?) ON CONFLICT(case_key,kind,version)
+                        DO UPDATE SET error=excluded.error WHERE results.payload IS NULL""",
+                               (key, kind, generation_version(record, current_config()), JOB_CRASHED))
+        except Exception as store_exc:  # noqa: BLE001 - the original failure is already logged
+            app.logger.error("summary_error_not_stored case=%s kind=%s error=%s", key, kind,
+                             type(store_exc).__name__)
         return False
 
 

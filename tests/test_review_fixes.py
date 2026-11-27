@@ -84,3 +84,36 @@ def test_briefing_finishing_during_the_dashboard_read_keeps_the_browser_polling(
     with closing(dashboard.connect()) as db:
         status = dashboard.briefing_status(FinishingDb(db), record, "de", CONFIG)
     assert finished and (status["active"] or status["ready"])
+
+
+# --- 4. a crashed summary job leaves a visible error, not silence --------------------------------
+
+def test_crashed_summary_job_shows_an_error_on_the_dashboard(client, case, monkeypatch):
+    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert dashboard.run_summary_job(case, "de") is False
+    de = client.get("/api/dashboard", query_string={"case": case}).json["selected"]["de"]
+    assert de == {"version": None, "data": {}, "error": "The summary job failed unexpectedly. Try again.",
+                  "approved": None, "active": False}
+
+
+def test_crashed_job_never_overwrites_a_finished_draft(client, case, monkeypatch):
+    store_draft(case)
+    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    dashboard.run_summary_job(case, "de")
+    de = client.get("/api/dashboard", query_string={"case": case}).json["selected"]["de"]
+    assert de["version"] and de["error"] is None
+
+
+def test_retry_after_a_crash_replaces_the_error(client, case, monkeypatch):
+    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    dashboard.run_summary_job(case, "facts")
+    monkeypatch.undo()
+    monkeypatch.setattr(dashboard, "current_config", lambda: CONFIG)
+    monkeypatch.setattr(dashboard, "make_facts", lambda c, t: {"facts": "f"})
+    assert dashboard.process(case, "facts", config=CONFIG) is True
+
+
+def test_crash_for_an_unknown_case_is_only_logged(client, case, monkeypatch, caplog):
+    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert dashboard.run_summary_job("8C_404/2026@2026-10-01", "de") is False
+    assert "summary_job_crashed" in caplog.text and "summary_error_not_stored" not in caplog.text
