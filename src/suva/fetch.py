@@ -69,6 +69,13 @@ class _FetchRun:
         self.labels = repo.list_known_positives(court="bger") if include_picks else []
         self.dockets = {label["docket"] for label in self.labels if label["docket"]}
         self.decisions: dict[str, _Decision] = {}
+        # Publication dates the KB already knows (any source, earlier runs): used when neither the listing
+        # nor the current snapshot has one, so a dated decision is never counted as an unknown-date sighting.
+        self.stored_publication = {
+            row["key"]: date.fromisoformat(row["publication_date"])
+            for row in repo.list_judgements(start=window.start.isoformat(), end=window.end.isoformat())
+            if row["publication_date"]
+        } if window.published_from else {}
         self.report = FetchReport(
             window.name, window.start.isoformat(), window.end.isoformat(),
             published_from=window.published_from.isoformat() if window.published_from else None,
@@ -95,7 +102,7 @@ class _FetchRun:
             if window.published_from:
                 publications = opencaselaw.publication_dates(path, window.start, window.end)
             for rec in opencaselaw.read_bger(path, window.start, window.end, published_from=window.published_from):
-                published = rec.publication_date or publications.get(rec.key)
+                published = rec.publication_date or publications.get(rec.key) or self.stored_publication.get(rec.key)
                 if window.includes_publication(published):
                     self.record(replace(rec, publication_date=published), in_window=True)
             progress["ranges"].append([self.report.start, self.report.end])
@@ -116,7 +123,8 @@ class _FetchRun:
         try:
             for start, end in entscheidsuche.week_ranges(window.start, window.end):
                 for rec in entscheidsuche.list_bger(client, start, end):
-                    published = rec.publication_date or publications.get(rec.key)
+                    published = (rec.publication_date or publications.get(rec.key)
+                                 or self.stored_publication.get(rec.key))
                     in_window = window.includes_publication(published)
                     if in_window or rec.docket in self.dockets:
                         self.record(rec, in_window=in_window)

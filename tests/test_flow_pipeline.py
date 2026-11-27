@@ -228,3 +228,51 @@ def test_unusable_text_does_not_count_as_having_text(repo):
     assert run.decisions["8C_1/2025@2025-10-02"].has_text is False  # and so does the run report
     run.record(SourceRecord("opencaselaw", "a", "8C_1/2025", date(2025, 10, 2), text=SUVA_CASE), in_window=True)
     assert run.decisions["8C_1/2025@2025-10-02"].has_text is True
+
+
+CHALLENGE_TODAY = date(2026, 11, 27)  # publication window 2026-08-27 .. 2026-11-27, decisions from 2026-06-13
+
+
+def stored_with_publication(repo, docket, decided, published):
+    repo.upsert_judgement(SourceRecord("opencaselaw", docket, docket, decided, publication_date=published,
+                                       text=SUVA_CASE))
+
+
+def test_listing_without_a_date_uses_the_stored_publication_date(tmp_path, repo):
+    from suva.windows import challenge_window
+
+    stored_with_publication(repo, "8C_5/2026", date(2026, 7, 1), date(2026, 7, 10))  # published before the window
+    write_parquet(tmp_path / "raw", [("8C_1/2026", "2026-10-01", "2026-10-05", SUVA_CASE)])
+    client = es_client([es_hit("8C_5/2026", "2026-07-01")], [])
+    rep = fetch(repo, tmp_path / "raw", challenge_window(CHALLENGE_TODAY), client=client)
+    assert "8C_5/2026@2026-07-01" not in rep.sightings and rep.publication_unknown == 0
+    assert list(rep.sightings) == ["8C_1/2026@2026-10-01"]
+
+
+def test_snapshot_row_without_a_date_uses_the_stored_publication_date(tmp_path, repo):
+    from suva.windows import challenge_window
+
+    stored_with_publication(repo, "8C_6/2026", date(2026, 7, 2), date(2026, 7, 20))
+    write_parquet(tmp_path / "raw", [("8C_6/2026", "2026-07-02", None, SUVA_CASE)])
+    rep = fetch(repo, tmp_path / "raw", challenge_window(CHALLENGE_TODAY), use_entscheidsuche=False)
+    assert rep.sightings == {} and rep.publication_unknown == 0
+
+
+def test_a_stored_date_inside_the_window_still_counts_as_a_dated_sighting(tmp_path, repo):
+    from suva.windows import challenge_window
+
+    stored_with_publication(repo, "8C_7/2026", date(2026, 9, 1), date(2026, 9, 10))
+    write_parquet(tmp_path / "raw", [("8C_1/2026", "2026-10-01", "2026-10-05", SUVA_CASE)])
+    rep = fetch(repo, tmp_path / "raw", challenge_window(CHALLENGE_TODAY),
+                client=es_client([es_hit("8C_7/2026", "2026-09-01")], []))
+    assert rep.sightings["8C_7/2026@2026-09-01"]["publication_date"] == "2026-09-10"
+    assert rep.publication_unknown == 0
+
+
+def test_a_decision_with_no_known_date_anywhere_is_still_an_unknown_date_sighting(tmp_path, repo):
+    from suva.windows import challenge_window
+
+    write_parquet(tmp_path / "raw", [("8C_1/2026", "2026-10-01", "2026-10-05", SUVA_CASE)])
+    rep = fetch(repo, tmp_path / "raw", challenge_window(CHALLENGE_TODAY),
+                client=es_client([es_hit("8C_8/2026", "2026-09-01")], []))
+    assert rep.sightings["8C_8/2026@2026-09-01"]["publication_date"] is None and rep.publication_unknown == 1
