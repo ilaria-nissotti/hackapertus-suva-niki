@@ -1,0 +1,189 @@
+# Relevance rules for Federal Supreme Court judgements (Suva)
+# ==========================================================
+#
+# This file decides which judgements are relevant. Edit it freely; no code changes needed.
+#
+# How scoring works
+#   points = base + the weights of every rule that matches (negative weights subtract)
+#   score  = 100 / (1 + e^(-points / scale))      a 0-100 score on an S-curve, never capped
+#
+#     points  -30   -20   -10     0   +10   +20   +30
+#     score     5    12    27    50    73    88    95      (with scale 10)
+#
+#   With weights fitted on the data (`python -m suva fit-weights`), the score roughly means
+#   "chance in % that Suva would consider this judgement relevant".
+#   +10 points always multiplies the odds by about 2.7, wherever the judgement starts.
+#   A judgement is flagged as relevant if score >= threshold. Bands group scores for triage.
+#   The explanations of the matching rules are shown to lawyers as the reason for the score.
+#
+# Writing a rule
+#   id:           short unique name (letters, digits, underscores)
+#   description:  what the rule means, in plain words
+#   field:        where to look in the judgement:
+#                   parties         the parties (Verfahrensbeteiligte / Participants à la procédure)
+#                   subject         the one-line subject (Gegenstand / Objet / Oggetto)
+#                   header          everything before the facts
+#                   facts           the facts (Sachverhalt / Faits / Fatti)
+#                   considerations  the court's reasoning (Erwägungen / Considérants)
+#                   dispositiv      the ruling (Demnach erkennt das Bundesgericht / Par ces motifs)
+#                   text            the whole judgement
+#                   laws            laws cited, German abbreviation: UVG, UVV, ATSG, IVG, KVG, BVG ...
+#                                   (LAA, LAINF, LPGA ... are already translated to these)
+#                   articles        articles cited, e.g. "Art. 6 Abs. 2 UVG"
+#                   bge             leading decisions cited, e.g. "BGE 134 V 109"
+#                   chamber         court division prefix: 8C, 9C, 4A ...
+#                   language        de, fr, it
+#   match:        any: [...]   fires if at least one term is found
+#                 all: [...]   fires only if every term is found
+#                 regex: "..." for advanced patterns
+#                 Text is matched as whole words, ignoring upper/lower case.
+#                 List terms in German, French AND Italian: judgements exist in one language only.
+#   case_sensitive: true       optional, e.g. for short abbreviations like "CNA"
+#   weight:       points added when the rule fires (negative to subtract)
+#     or, for a graded rule that counts matches instead of just yes/no:
+#   per_match:    points per match (e.g. per UVG article cited)
+#   max:          cap on the points of a graded rule (optional)
+#   explanation:  sentence shown to lawyers when the rule fires
+#   source:       where the rule comes from: expert | data | apertus | hypothesis
+#   evidence:     filled in from `python -m suva evaluate` (how often it fires in relevant vs not relevant)
+#
+# Workflow
+#   python -m suva analyze        find candidate rules in the training data
+#   python -m suva evaluate       check the rules: precision, recall, misses, false alarms
+#   python -m suva fit-weights    suggest weights from the data (written to rules.fitted.yaml)
+
+# base, threshold and weights: fitted on the training data (decisions 2025-10-01 to 2026-02-28)
+# with `python -m suva fit-weights`, then copied here. Adjust freely.
+base: -95         # starting points: most judgements are not relevant (about 1.5%)
+scale: 10         # points per unit of log-odds; leave at 10 unless all weights are rescaled
+threshold: 9      # flag as relevant from this score (low on purpose: missing a relevant judgement is worse)
+bands:            # triage bands shown to lawyers
+  high: 50        # score >= 50: very likely worth summarising
+  low: 5          # score < 5: unlikely to be relevant; in between: check
+
+rules:
+  - id: suva_party
+    description: Suva is a party to the proceedings
+    field: parties
+    match:
+      any:
+        - Suva
+        - Schweizerische Unfallversicherungsanstalt
+        - Caisse nationale suisse d'assurance en cas d'accidents
+        - Istituto nazionale svizzero di assicurazione contro gli infortuni
+        - CNA
+        - INSAI
+    weight: 6
+    explanation: "Suva is directly involved as a party."
+    source: hypothesis
+    evidence: ""
+
+  - id: accident_insurance_subject
+    description: The subject is accident insurance
+    field: subject
+    match:
+      any:
+        - Unfallversicherung
+        - assurance-accidents
+        - assurance accidents
+        - assicurazione contro gli infortuni
+        - assicurazione infortuni
+    weight: 51
+    explanation: "The case is about accident insurance."
+    source: hypothesis
+    evidence: ""
+
+  - id: cites_accident_insurance_law
+    description: Cites articles of the Accident Insurance Act or Ordinance (UVG/UVV, also LAA/OLAA, LAINF/OAINF); more articles, more points
+    field: articles
+    match:
+      regex: " (UVG|UVV)$"
+    case_sensitive: true
+    per_match: 6
+    max: 30
+    explanation: "Applies accident insurance law (UVG/UVV articles cited)."
+    source: hypothesis
+    evidence: ""
+
+  - id: invalidity_insurance_subject
+    description: The subject is invalidity insurance (Suva also summarises these)
+    field: subject
+    match:
+      any:
+        - Invalidenversicherung
+        - assurance-invalidité
+        - assurance invalidité
+        - assicurazione per l'invalidità
+        - assicurazione invalidità
+    weight: 41
+    explanation: "The case is about invalidity insurance."
+    source: data
+    evidence: "all 13 relevant judgements missed by the first rules were invalidity insurance cases"
+
+  - id: social_insurance_chamber
+    description: Decided by a social insurance division (8C or 9C)
+    field: chamber
+    match:
+      any: [8C, 9C]
+    weight: 32
+    explanation: "Decided by a social insurance division of the court."
+    source: hypothesis
+    evidence: ""
+
+  - id: health_insurance_subject
+    description: The subject is health insurance
+    field: subject
+    match:
+      any: [Krankenversicherung, assurance-maladie, assurance maladie, assicurazione malattie]
+    weight: -5
+    explanation: "Health insurance case, outside accident insurance."
+    source: hypothesis
+    evidence: ""
+
+  - id: other_branch_subject
+    description: The subject is unemployment insurance or occupational pensions
+    field: subject
+    match:
+      any:
+        - Arbeitslosenversicherung
+        - berufliche Vorsorge
+        - assurance-chômage
+        - prévoyance professionnelle
+        - assicurazione contro la disoccupazione
+        - previdenza professionale
+    weight: -9
+    explanation: "Unemployment insurance or occupational pensions, outside accident insurance."
+    source: hypothesis
+    evidence: ""
+
+  - id: not_entered
+    description: The court did not enter into the appeal (inadmissible)
+    field: dispositiv
+    match:
+      any: [nicht eingetreten, irrecevable, inammissibile]
+    weight: -43
+    explanation: "Appeal declared inadmissible: no ruling on the substance."
+    source: hypothesis
+    evidence: ""
+
+# LLM judge (second stage, optional): Apertus rates candidates and gives a written reason.
+#   candidate_threshold: only judgements with a score at or above this are sent to the judge
+#   model: leave empty to use LLM_NAME from .env
+#   points: added to the rules points when a verdict exists (`evaluate --with-judge`)
+#   rubric: what Suva considers relevant, in plain words; the judge follows it
+judge:
+  candidate_threshold: 5
+  model:
+  points:
+    high: 10
+    medium: 0
+    low: -20
+  rubric: |
+    Suva is the largest Swiss accident insurer. Its lawyers summarise Federal Supreme Court
+    judgements that matter for their daily work in accident insurance (UVG/LAA): new or clarified
+    case law on the notion of accident, natural and adequate causal link, benefits, integrity
+    compensation, disability pensions, insurance obligation and premiums, recourse, or procedural
+    questions under ATSG that affect accident insurers.
+    Judgements that only concern other insurance branches (health, unemployment, occupational
+    pensions), or that are dismissed on purely formal grounds without a statement of legal
+    interest, are usually not relevant.
