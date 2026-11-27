@@ -291,7 +291,7 @@ def dashboard_data():
     sort = request.args.get("sort", "score")
     rows.sort(key=lambda r: (r["publication_date"] or "", r["decision_date"] or "", r["docket"]), reverse=True)
     if sort != "date":
-        rows.sort(key=lambda r: r["score"] if r["score"] is not None else -1, reverse=True)
+        rows.sort(key=lambda r: (r["score"], r["points"]) if r["score"] is not None else (-1, 0), reverse=True)
     page = request.args.get("page", 1, type=int)
     page = min(max(page, 1), max(1, (len(rows) + PAGE - 1) // PAGE))
     response = jsonify(

@@ -51,7 +51,7 @@ def record(row, rules_digest):
         "decision_date": row["decision_date"], "publication_date": row["publication_date"],
         "date_source": row["publication_date_source"], "language": row["language"],
         "full_text": row["text"] or "", "source_url": None,
-        "score": score, "band": row["band"], "fired": row["fired"], "score_current": current,
+        "score": score, "points": row["points"], "band": row["band"], "fired": row["fired"], "score_current": current,
         "status": ("Unscored" if score is None else STATUS[row["band"]] if current else "Stale"),
     }
 

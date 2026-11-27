@@ -87,8 +87,9 @@ def metrics(scored: list[tuple[dict, ScoreResult]], threshold: float) -> Metrics
 
 
 def ranked(scored: list[tuple[dict, ScoreResult]]) -> list[tuple[dict, ScoreResult]]:
-    """Highest score first; ties are broken pessimistically (not relevant first), so ties never flatter."""
-    return sorted(scored, key=lambda rs: (-rs[1].score, rs[0]["relevant"], rs[0]["key"]))
+    """Highest score first (points break ties where the 0-100 score saturates); remaining ties are
+    broken pessimistically (not relevant first), so ties never flatter."""
+    return sorted(scored, key=lambda rs: (-rs[1].score, -rs[1].points, rs[0]["relevant"], rs[0]["key"]))
 
 
 def ranking(scored: list[tuple[dict, ScoreResult]]) -> Ranking:

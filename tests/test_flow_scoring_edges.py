@@ -41,12 +41,22 @@ def test_negative_points_are_clamped_at_minus_60_log_odds():
     assert to_score(-599, 10) > to_score(-600, 10)
 
 
-def test_high_scores_saturate_to_100_long_before_the_clamp():
-    # BUG: the docstring says scores stay unrounded "so very low or very high scores still sort",
-    # but float precision makes everything above roughly z=36.8 exactly 100.0, so these tie.
-    # Expected: 368 points should still rank above 367 points (e.g. sort by points as a tie-break).
+def test_high_scores_saturate_to_100_but_still_rank_by_points():
     assert to_score(367, 10) < 100.0
-    assert to_score(368, 10) == to_score(600, 10) == 100.0
+    assert to_score(368, 10) == to_score(600, 10) == 100.0  # float precision: the score itself ties
+    top = [(rec(f"8C_{p}/2025@2025-10-02", relevant=p == 600), ScoreResult("", to_score(p, 10), p, "high", True))
+           for p in (400, 600, 368)]
+    from suva.scoring.evaluate import ranked
+    assert [s.points for _, s in ranked(top)] == [600, 400, 368]  # points break the tie
+    assert ranking(top).precision_at[10] == 1 / 3 and ranking(top).depth_for_recall[1.0] == 1
+
+
+def test_stored_scores_with_equal_score_are_listed_by_points(repo):
+    for p in (400, 600, 368):
+        repo.upsert_judgement(SourceRecord("opencaselaw", f"s{p}", f"k{p}", None))
+    repo.save_scores([{"key": f"k{p}", "score": 100.0, "points": p, "band": "high", "fired": [], "rules_hash": "h",
+                       "parser_version": None, "inputs_hash": None, "text_hash": None} for p in (400, 600, 368)])
+    assert [s["points"] for s in repo.list_scores()] == [600, 400, 368]
 
 
 def test_direct_ruleset_with_zero_scale_divides_by_zero():

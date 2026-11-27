@@ -355,13 +355,13 @@ class SQLiteRepository(Repository):
         return self._score_row(row) if row else None
 
     def list_scores(self) -> list[dict[str, Any]]:
-        return [self._score_row(r) for r in self.conn.execute("SELECT * FROM relevance_scores ORDER BY score DESC")]
+        return [self._score_row(r) for r in self.conn.execute("SELECT * FROM relevance_scores ORDER BY score DESC, points DESC")]
 
     def list_review_rows(self, start=None, end=None, keys=None, *, include_text=False) -> list[dict[str, Any]]:
         sql = ("SELECT j.key, j.docket, j.decision_date, j.publication_date, j.publication_date_source,"
                f" j.language, {'j.text' if include_text else 'NULL'} AS text,"
                " p.subject, p.parsed_at, p.text_hash AS parse_text_hash, p.parser_version,"
-               " s.score, s.band, s.fired, s.rules_hash, s.inputs_hash,"
+               " s.score, s.points, s.band, s.fired, s.rules_hash, s.inputs_hash,"
                " s.parser_version AS score_parser_version, s.text_hash AS score_text_hash"
                " FROM judgements j LEFT JOIN parses p ON p.key = j.key"
                " LEFT JOIN relevance_scores s ON s.key = j.key WHERE 1=1")

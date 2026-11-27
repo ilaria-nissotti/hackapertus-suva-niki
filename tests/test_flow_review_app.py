@@ -263,6 +263,14 @@ def test_dashboard_status_filter_and_sort_by_date(client, tmp_path):
     assert [r["docket"] for r in low["rows"]] == ["8C_2/2026"] and low["count"] == 2
 
 
+def test_dashboard_breaks_equal_scores_by_points(client, tmp_path):
+    keys = [seed_kb(tmp_path / "kb.sqlite", f"8C_{i}/2026", SUVA_CASE, score=100.0, band="high") for i in (1, 2, 3)]
+    repo = SQLiteRepository(tmp_path / "kb.sqlite")
+    repo.save_scores([repo.get_score(k) | {"points": p} for k, p in zip(keys, (400, 600, 368))])
+    repo.close()
+    assert [r["docket"] for r in page(client)["rows"]] == ["8C_2/2026", "8C_1/2026", "8C_3/2026"]
+
+
 def test_dashboard_unknown_language_falls_back_to_german(client, case):
     assert page(client, lang="it")["lang"] == "de"
     assert page(client, lang="fr")["lang"] == "fr"
