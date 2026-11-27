@@ -18,7 +18,7 @@ export type Dashboard = {
   scored: number; shortlist: number; dates: [string, string] | null; model: string;
   page: number; lang: Language; audio: Briefing; active: boolean;
 };
-export type Action = (endpoint: string, body: FormData) => Promise<boolean>;
+export type Action = (endpoint: string, body: FormData, onError?: (message: string) => void) => Promise<boolean>;
 
 export function fields(values: Record<string, string>) {
   const form = new FormData();

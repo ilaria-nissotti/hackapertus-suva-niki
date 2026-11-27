@@ -22,6 +22,9 @@ function Summary({record, lang, audio, action, busy, visible}: {
   const result = record[lang];
   const saved = result.approved ?? result.data.summary ?? '';
   const [edit, setEdit] = useState<string>();
+  const [saveStatus, setSaveStatus] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [submitted, setSubmitted] = useState<string>();
   const player = useRef<HTMLAudioElement>(null);
   useEffect(() => {
     const pause = () => player.current?.pause();
@@ -31,6 +34,12 @@ function Summary({record, lang, audio, action, busy, visible}: {
   useEffect(() => {
     if (!visible) player.current?.pause();
   }, [visible]);
+  useEffect(() => {
+    if (submitted !== undefined && result.approved === submitted) {
+      setEdit(current => current === submitted ? undefined : current);
+      setSubmitted(undefined);
+    }
+  }, [result.approved, submitted]);
   const base = {docket: record.docket, lang};
   return <>
     <section>
@@ -39,15 +48,30 @@ function Summary({record, lang, audio, action, busy, visible}: {
         <p role="alert">{result.error}</p> : result.data.summary ?
         <form onSubmit={async event => {
           event.preventDefault();
-          if (await action('/approve', fields({...base, summary: edit ?? saved}))) setEdit(undefined);
+          const summary = (edit ?? saved).trim();
+          setSaveError('');
+          setSaveStatus('Saving…');
+          if (await action('/approve', fields({...base, summary}), setSaveError)) {
+            setEdit(summary);
+            setSubmitted(summary);
+            setSaveStatus(result.approved ? 'Approved edit saved.' : 'Summary approved.');
+          } else {
+            setSaveStatus('');
+          }
         }}>
           <label>{result.approved ? 'Approved summary' : 'AI draft · Review before use'}
             <textarea lang={lang} rows={12} required maxLength={16000} disabled={busy}
-              value={edit ?? saved} onChange={event => setEdit(event.target.value)}/>
+              value={edit ?? saved} onChange={event => {
+                setEdit(event.target.value);
+                setSaveError('');
+                setSaveStatus('');
+              }}/>
           </label>
           <button className="primary" disabled={busy || !(edit ?? saved).trim()}>
             {result.approved ? 'Save approved edit' : 'Approve summary'}
           </button>
+          {saveStatus && <p className="save-feedback" role="status">{saveStatus}</p>}
+          {saveError && <p className="save-feedback" role="alert">{saveError}</p>}
         </form> : <p>Generate independent German and French drafts from the original ruling.</p>}
       <Evidence label="Supporting passages for the draft" passages={result.data.quotes}/>
       {!record.de.active && !record.fr.active && !(record.de.data.summary && record.fr.data.summary) &&

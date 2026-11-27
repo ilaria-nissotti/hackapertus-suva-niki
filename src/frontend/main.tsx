@@ -88,7 +88,7 @@ function App() {
     return () => { abort.abort(); window.clearTimeout(timer); };
   }, [dataQuery, refresh]);
 
-  async function action(endpoint: string, body: FormData) {
+  async function action(endpoint: string, body: FormData, onError?: (message: string) => void) {
     if (actionLock.current) return false;
     const start = context.current;
     actionLock.current = true;
@@ -105,12 +105,13 @@ function App() {
         form.current?.reset();
         navigate(link({case: data.case, view: null}));
       }
-      if (start === context.current || endpoint === '/add') setNotice(data.message || '');
+      if (!onError && (start === context.current || endpoint === '/add')) setNotice(data.message || '');
       setRefresh(value => value + 1);
       return true;
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : 'Could not complete the request.';
       if (endpoint === '/add') setAddError(message);
+      else if (onError) onError(message);
       else if (start === context.current) setNotice(message);
       return false;
     } finally {

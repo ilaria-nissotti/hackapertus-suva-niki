@@ -168,3 +168,7 @@ button.call-button:hover:not(:disabled) { background: #154b36 }
 @media (prefers-reduced-motion: reduce) {
   [data-chat-playing] .call-portrait { animation: none; box-shadow: 0 0 0 .3rem #83bc9e; }
 }
+
+.save-feedback { margin-top: .5rem }
+.save-feedback[role="status"] { color: #245639 }
+.save-feedback[role="alert"] { color: #852e39 }
