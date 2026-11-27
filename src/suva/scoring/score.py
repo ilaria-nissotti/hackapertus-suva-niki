@@ -24,10 +24,6 @@ class FiredRule:
     points: float
     explanation: str
 
-    @property
-    def weight(self) -> float:  # backwards-compatible name
-        return self.points
-
 
 @dataclass
 class ScoreResult:
