@@ -13,5 +13,5 @@ openpyxl>=3.1
 pyarrow>=15
 # Relevance rules (rules/rules.yaml)
 pyyaml>=6.0
-# UI
-streamlit>=1.38
+# Review app (Flask serves the React build in src/frontend)
+Flask>=3.1,<4

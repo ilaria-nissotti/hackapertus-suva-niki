@@ -51,3 +51,12 @@ The first fetch downloads the OpenCaseLaw snapshot and queries entscheidsuche. U
 - Scoring labels follow the same dated matching as fetch and parse. A dataset built from stale parses is reported, not silently used. Tune rules on the train split only. Use `evaluate --split test` for the final number. Bump `judge.PROMPT_VERSION` when the judge prompt changes.
 - Keep `.env`, local databases, raw mirror caches, `data/scoring/` outputs, and generated manifests out of commits unless explicitly approved for sharing. Keep audit entries free of prompt text and API keys. Use a scratch database when replaying imports or parsing during review.
 - Preserve the organizer’s paths and use [technical_report.md](technical_report.md) for submission run instructions and results.
+
+## Review app
+
+The review workspace is a Flask app (`src/app.py`) serving the React/TypeScript build in `src/frontend/`. Build it with `npm --prefix src/frontend ci && npm --prefix src/frontend run build` (Node.js 20.19+ or 22.12+), then run `.venv/bin/python src/app.py serve` and open http://127.0.0.1:5050.
+
+- Draft German and French independently from the ruling and a shared factual brief, with examples in the target language. Keep review and approval explicit.
+- Audio requires a separate approved summary per language. Apertus writes the script and cites original lines. Send only the script to ElevenLabs. Store and serve audio locally, and invalidate it when the approval, source, or generation settings change.
+- Case conversation uses Apertus for answers and recap, with original ruling citations. ElevenLabs handles transcription and narration, separate from approved summaries. Keep recorded questions out of logs and storage.
+- Run `node --test tests/conversation-ui.test.cjs` for the simulated browser and media flows. Python tests for the app run under `python -m pytest -q`.

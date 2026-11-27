@@ -15,6 +15,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.suva-work/
 
 # Node
 node_modules/
