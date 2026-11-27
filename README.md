@@ -76,6 +76,91 @@ The submission must:
 
 ## Getting started
 
+The local judgment-review app uses React, TypeScript, Vite, Flask, SQLite, and Apertus via Keera. Building the frontend requires Node.js 20.19+ or 22.12+ on a supported release line. Flask serves the build on the same origin.
+Set `LLM_BASE_URL=https://gateway.keera.ch/api/v1`,
+`LLM_NAME=apertus-v1-5-8b` and your `LLM_API_KEY` in the ignored `.env` file
+at the repo root.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm --prefix src/frontend ci
+npm --prefix src/frontend run build
+.venv/bin/python src/bger.py check-apertus
+.venv/bin/python src/app.py sync
+.venv/bin/python src/app.py serve
+```
+
+Rebuild the frontend after changing its source. Open [the local review dashboard](http://127.0.0.1:5050). You can score and
+summarize individual judgments there. For offline or replacement data,
+run `.venv/bin/python src/app.py import judgments.jsonl`. Each line needs
+`docket_number` (or `docket`) and `full_text`; optional metadata includes
+`title`, `source_url`, `decision_date`, `publication_date` and `date_source`.
+The database lives in ignored `.suva-work/`. Sync resumes at missing cases.
+
+```sh
+.venv/bin/python src/evaluate.py --positive-limit 3
+.venv/bin/python src/app.py score
+.venv/bin/python src/app.py summarize-june
+```
+
+Run evaluation without the limit for the full historical benchmark. Run batch
+jobs one at a time. Successful results are reused by source text, model and
+prompt version. Failed items can be rerun. The score is an ordinal ranking
+mapped to fixed points on a 0–100 scale. High scores require evidence from the
+judgment and an independent model check. The benchmark selected 45 as the
+shortlist threshold to retain Review cases. A score of 70 or above is needed
+for the Relevant label. The two summary calls each use their
+own language examples and a shared factual brief. Approved edits can be used
+as style examples for future drafts.
+
+The mirror's observed dates are shown in the UI. They reflect the imported
+dataset's coverage; the April–June challenge window may contain more cases.
+The app binds to loopback and sends the selected judgment to your configured
+inference endpoint when triage or summaries are requested.
+
+### Audio briefings
+
+Set `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID_DE`, and
+`ELEVENLABS_VOICE_ID_FR` in the local `.env`. Choose and audition a voice
+for each language. Approve the language's summary in the dashboard,
+then select **Generate briefing**. Apertus writes a short script and
+ElevenLabs receives only that script for narration. Listen in the
+dashboard or open the transcript and supporting passage.
+
+For the demo, approve both summaries for `8C_354/2026`, then pre-generate:
+
+```sh
+.venv/bin/python src/app.py briefing --case 8C_354/2026 --lang both
+```
+
+Replaying cached audio does not call either provider. Editing the approved
+summary invalidates its recording.
+
+### Ask this judgment
+
+Open a case, select **Ask this judgment**, and choose Deutsch or Français.
+Select **Start case call**, speak, then select **Send question**. ElevenLabs
+transcribes the recording using Scribe v2. Apertus answers with source
+passages, and ElevenLabs reads the answer aloud. Select **Ask follow-up**
+for the next question. The **Conversation summary** view asks Apertus to
+recap the discussion. The six most recent turns per case and language stay in
+the page's memory until reload or close.
+
+To add a portrait, export a PNG or JPG of your avatar and save it as
+`.suva-work/avatar.png` or `.suva-work/avatar.jpg`. Reload the page to see it.
+The portrait's ring animates while the answer plays.
+
+Voice questions require **Speech to Text** on the ElevenLabs key. Spoken
+answers require **Text to Speech** and the existing language voice IDs. The
+app does not save microphone recordings. For the demo use public judgments
+and avoid including nonpublic information in questions.
+
+```sh
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
+node --test tests/conversation-ui.test.cjs
+```
+
 1. Click **Use this template** to create your own repository.
 
 ## License
