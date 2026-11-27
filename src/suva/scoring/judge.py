@@ -16,7 +16,7 @@ from typing import Any
 from suva.llm import LLMClient
 from suva.scoring.rules import RuleSet
 
-PROMPT_VERSION = "judge/v1"
+PROMPT_VERSION = "judge/v2"
 LEVELS = ("high", "medium", "low")
 DEFAULT_RUBRIC = (
     "Suva is the largest Swiss accident insurer. Its lawyers summarise Federal Supreme Court judgements "
@@ -57,6 +57,7 @@ def excerpt(record: dict[str, Any], facts_chars: int = 1500, ruling_chars: int =
         f"Parties: {record.get('parties') or '-'}",
         f"Subject: {record.get('subject') or '-'}",
         f"Laws cited: {', '.join(record.get('laws') or []) or '-'}",
+        *([f"Headnote (leading decision): {record['regeste'][:facts_chars]}"] if record.get("regeste") else []),
         f"Facts (start): {(record.get('facts') or record.get('text') or '')[:facts_chars]}",
         f"Ruling: {(record.get('dispositiv') or '')[:ruling_chars] or '-'}",
     ]

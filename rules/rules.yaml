@@ -23,6 +23,7 @@
 #                   parties         the parties (Verfahrensbeteiligte / Participants à la procédure)
 #                   subject         the one-line subject (Gegenstand / Objet / Oggetto)
 #                   header          everything before the facts
+#                   regeste         the headnote of a leading decision (BGE / ATF / DTF), empty otherwise
 #                   facts           the facts (Sachverhalt / Faits / Fatti)
 #                   considerations  the court's reasoning (Erwägungen / Considérants)
 #                   dispositiv      the ruling (Demnach erkennt das Bundesgericht / Par ces motifs)

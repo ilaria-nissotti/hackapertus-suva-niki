@@ -100,6 +100,7 @@ def build_record(repo: Repository, row: dict[str, Any], positives: set[str], tes
         "parties": parse.get("parties") or "",
         "subject": parse.get("subject") or "",
         "header": joined(("header",)),
+        "regeste": joined(("regeste",)),
         "facts": joined(FACT_KINDS),
         "considerations": joined(REASON_KINDS),
         "dispositiv": joined(("dispositiv",)),

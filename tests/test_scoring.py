@@ -7,7 +7,7 @@ from suva.scoring import analyze
 from suva.scoring.dataset import build_dataset, load_dataset
 from suva.scoring.evaluate import evaluate
 from suva.scoring.fit import fit_weights
-from suva.scoring.judge import judge_record, parse_verdict
+from suva.scoring.judge import excerpt, judge_record, parse_verdict
 from suva.scoring.rules import DEFAULT_RULES_PATH, RulesError, load_rules, parse_rules
 from suva.scoring.score import score_record
 from suva.sources.base import SourceRecord
@@ -228,6 +228,23 @@ def test_docket_only_pick_with_several_decisions_is_ambiguous(repo, tmp_path):
     repo.upsert_known_positive(dict(ref="8C_6/2025", docket="8C_6/2025", court="bger", in_xlsx=1, in_exports=0))
     rep = build_dataset(repo, tmp_path / "dataset.jsonl")
     assert rep.relevant == 0 and rep.picks_ambiguous == ["8C_6/2025"] and rep.picks_not_in_dataset == []
+
+
+def test_bge_headnote_becomes_the_regeste_field(repo, tmp_path):
+    from test_segment import BGE_DE
+
+    add(repo, "9C_480/2022", date(2025, 11, 3), BGE_DE)
+    parse_all(repo)
+    out = tmp_path / "dataset.jsonl"
+    build_dataset(repo, out)
+    record = load_dataset(out)[0]
+    assert "Kongruenz der Leistungen" in record["regeste"] and "Kongruenz" not in record["header"]
+    rule = parse_rules({"rules": [{"id": "atsg_69", "field": "regeste", "match": {"any": ["Art. 69 Abs. 1 ATSG"]},
+                                   "weight": 5, "explanation": "x"}]}).rules[0]
+    assert rule.matches(record)
+    shown = excerpt(record)
+    assert "Headnote (leading decision): Regeste" in shown and "Kongruenz der Leistungen" in shown
+    assert "Headnote" not in excerpt(rec())  # ordinary judgements: no empty headnote line
 
 
 def test_parse_verdict_accepts_json_inside_text_and_rejects_bad_answers():

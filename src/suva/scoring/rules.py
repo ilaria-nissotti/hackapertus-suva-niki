@@ -33,7 +33,7 @@ from suva.config import REPO_ROOT
 
 DEFAULT_RULES_PATH = REPO_ROOT / "rules" / "rules.yaml"
 
-TEXT_FIELDS = ("parties", "subject", "header", "facts", "considerations", "dispositiv", "text")
+TEXT_FIELDS = ("parties", "subject", "header", "regeste", "facts", "considerations", "dispositiv", "text")
 LIST_FIELDS = ("laws", "articles", "bge", "chamber", "language")
 FIELDS = TEXT_FIELDS + LIST_FIELDS
 MATCH_KINDS = ("any", "all", "regex")
