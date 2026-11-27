@@ -1,0 +1,183 @@
+from suva.parse.segment import _plausible_next, paragraphs, segment
+
+DE = """Bundesgericht
+
+8C_185/2025
+
+Urteil vom 4. Dezember 2025
+
+IV. öffentlich-rechtliche Abteilung
+
+Besetzung
+
+Bundesrichterin Viscione, Präsidentin.
+
+Verfahrensbeteiligte
+
+Suva, Fluhmattstrasse 1, 6002 Luzern,
+Beschwerdeführerin,
+
+gegen
+
+A.________,
+Beschwerdegegner.
+
+Gegenstand
+
+Unfallversicherung (Kausalzusammenhang),
+
+Sachverhalt:
+
+A.
+
+Der Versicherte stürzte am 20. Dezember 2023.
+
+B.
+
+Das kantonale Gericht hiess die Beschwerde gut.
+
+Erwägungen:
+
+1.
+
+Die Beschwerde ist zulässig (
+Art. 82 BGG
+).
+
+2.
+
+2.1. Streitig ist die natürliche Kausalität.
+
+2.2. Nach Art. 6 Abs. 1 UVG gilt …
+
+20. Dezember 2023 war ein Sonntag.
+
+3.
+
+Die Beschwerde ist begründet.
+
+Demnach erkennt das Bundesgericht:
+
+1.
+
+Die Beschwerde wird gutgeheissen.
+
+Luzern, 4. Dezember 2025
+""" + ("Lorem ipsum dolor sit amet. " * 30)
+
+ORDER = """Bundesgericht
+
+9C_526/2025
+
+Gegenstand
+
+Krankenversicherung,
+
+Nach Einsicht
+
+in die Beschwerde vom 12. September 2025,
+
+in Erwägung,
+
+dass die Beschwerde offensichtlich unzulässig ist,
+
+erkennt der Einzelrichter:
+
+1.
+
+Auf die Beschwerde wird nicht eingetreten.
+""" + ("x " * 600)
+
+
+def ids(seg):
+    return [p.pid.split("#", 1)[1] for p in seg.passages]
+
+
+def test_plausible_numbering():
+    assert _plausible_next(None, (1,))
+    assert _plausible_next((2,), (2, 1)) and _plausible_next((2, 1), (2, 2)) and _plausible_next((2, 2), (3,))
+    assert not _plausible_next((2, 2), (20,)) and not _plausible_next((3,), (1,))
+
+
+def test_full_decision_de():
+    s = segment("8C_185/2025@2025-12-04", DE)
+    assert s.status == "ok", s.issues
+    assert ids(s) == ["header", "facts", "reasons", "E.1", "E.2", "E.2.1", "E.2.2", "E.3", "dispositiv"]
+    e22 = next(p for p in s.passages if p.number == "2.2")
+    assert "20. Dezember 2023 war ein Sonntag." in e22.text  # date not taken as E.20
+    assert "Art. 82 BGG)" in next(p for p in s.passages if p.number == "1").text  # line breaks joined
+    assert s.chamber == "IV. öffentlich-rechtliche Abteilung"
+    assert s.parties.startswith("Suva, Fluhmattstrasse")
+    assert s.subject == "Unfallversicherung (Kausalzusammenhang),"
+
+
+def test_no_text_lost():
+    s = segment("k", DE)
+    joined = "\n\n".join(p.text for p in s.passages)
+    assert sum(len(p.text) for p in paragraphs(DE)) == sum(len(x) for x in joined.split("\n\n"))
+
+
+def test_short_order_is_ok_without_numbers():
+    s = segment("9C_526/2025@2025-10-03", ORDER)
+    assert s.status == "ok", s.issues
+    assert ids(s) == ["header", "reasons", "dispositiv"]
+    assert "no_numbered_considerations" in s.issues
+
+
+def test_italian_and_french_headings():
+    it = DE.replace("Sachverhalt:", "Fatti:").replace("Erwägungen:", "Diritto:").replace(
+        "Demnach erkennt das Bundesgericht:", "Per questi motivi, il Tribunale federale pronuncia:")
+    fr = DE.replace("Sachverhalt:", "Faits :").replace("Erwägungen:", "Considérant en droit :").replace(
+        "Demnach erkennt das Bundesgericht:", "Par ces motifs, le Tribunal fédéral prononce :")
+    for t in (it, fr):
+        s = segment("k", t)
+        assert s.status == "ok" and "E.2.2" in ids(s) and ids(s)[-1] == "dispositiv"
+
+
+def test_no_reasons_keeps_everything_as_full():
+    s = segment("k", "Bundesgericht\n\nGegenstand\n\nUnfall\n\n" + "Freier Text ohne Struktur. " * 60)
+    assert s.status == "failed" and "no_reasons_heading" in s.issues
+    assert "full" in ids(s) and "Freier Text" in next(p for p in s.passages if p.kind == "full").text
+
+
+def test_empty_and_short():
+    assert segment("k", None).issues == ["no_text"]
+    s = segment("k", "Erwägungen:\n\n1.\n\nkurz\n\nDemnach erkennt das Bundesgericht:\n\n1.\n\nx")
+    assert "too_short" in s.issues and s.status == "partial"
+
+
+def test_missing_dispositiv_is_partial():
+    s = segment("k", DE.split("Demnach erkennt")[0] + "y " * 500)
+    assert s.status == "partial" and "no_dispositiv" in s.issues
+
+
+def test_combined_italian_heading_and_french_order():
+    it = DE.replace("Sachverhalt:\n\nA.\n\nDer Versicherte stürzte am 20. Dezember 2023.\n\nB.\n\nDas kantonale Gericht hiess die Beschwerde gut.\n\nErwägungen:",
+                    "Ritenuto in fatto e considerando in diritto:")
+    s = segment("k", it)
+    assert s.status == "ok" and "E.2.1" in ids(s), s.issues
+    fr = ("Tribunal fédéral\n\n4D_217/2025\n\nObjet\n\ncontrat de travail\n\nLe Président :\n\n"
+          "vu le recours,\n\nque les frais peuvent être réduits,\n\nOrdonne :\n\n1.\n\nLa cause est rayée du rôle.\n\n"
+          "Le Président : Hurni") + " x" * 600
+    s = segment("k", fr)
+    assert "no_reasons_heading" not in s.issues and ids(s)[-1] == "dispositiv"
+    assert "Le Président : Hurni" in s.passages[-1].text  # signature, not a heading
+
+
+def test_error_page_is_flagged_not_split():
+    s = segment("k", "menu\n\nListe der Neuheiten\n\nDokument nicht gefunden Dieser AZA-Entscheid ist in elektronischer Form nicht verfügbar.")
+    assert s.status == "failed" and s.issues == ["source_error_page"] and s.passages == []
+
+
+def test_single_judge_heading_variants():
+    for heading in ("Die Präsidentin zieht in Erwägung:", "La Juge présidant:", "Il Presidente:",
+                    "Das Bundesgericht zieht in Erwägung:", "Das präsidierende Mitglied zieht in Erwägung:"):
+        t = ("Bundesgericht\n\nGegenstand\n\nRevision\n\n" + heading +
+             "\n\n1.\n\nDie Beschwerde ist unzulässig.\n\n2.\n\nKosten.\n\nDemnach erkennt die Präsidentin:\n\n1.\n\nNichteintreten.") + " x" * 600
+        s = segment("k", t)
+        assert s.status == "ok" and ids(s)[:4] == ["header", "reasons", "E.1", "E.2"], (heading, s.issues)
+
+
+def test_das_bundesgericht_erkennt():
+    s = segment("k", DE.replace("Demnach erkennt das Bundesgericht:", "Das Bundesgericht erkennt:"))
+    assert s.status == "ok" and ids(s)[-1] == "dispositiv"
