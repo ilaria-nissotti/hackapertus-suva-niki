@@ -213,9 +213,11 @@ def enqueue(key, kinds):
 def present(db, record, config):
     result = dict(record)
     for kind in ("de", "fr"):
-        row = get_result(db, record, kind, config)
+        # Read the pending flag before the row: a job commits its row before clearing the flag, so a response
+        # never says "not active" while still missing the result it just committed.
         with pending_lock:
             active = (record["key"], kind) in pending
+        row = get_result(db, record, kind, config)
         result[kind] = {
             "version": row["version"] if row and row["payload"] else None,
             "data": json.loads(row["payload"]) if row and row["payload"] else {},
@@ -238,10 +240,10 @@ def briefing_status(db, record, lang, config):
     if not ctx:
         return {}
     key, _ = ctx
+    with pending_lock:  # before the row, as in present()
+        active = ("briefing", key) in pending
     row = db.execute("""SELECT script, evidence, mp3 IS NOT NULL AS ready, error
                         FROM briefings WHERE cache_key=?""", (key,)).fetchone()
-    with pending_lock:
-        active = ("briefing", key) in pending
     return {"key": key, "active": active, "configured": bool(api_key),
             "ready": bool(row and row["ready"]), "error": row["error"] if row else None,
             "script": row["script"] if row else None,

@@ -1,0 +1,86 @@
+"""Regression tests for the review-app fixes: stale polling, lost approvals, crashed jobs, startup checks."""
+
+import json
+from contextlib import closing
+from datetime import date
+from unittest.mock import patch
+
+import pytest
+
+import app as dashboard
+from conftest import seed_kb
+from test_review_app import SUVA_CASE
+
+CONFIG = {"LLM_NAME": "m"}
+JSON = {"Accept": "application/json"}
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(dashboard, "current_config", lambda: CONFIG)
+    monkeypatch.setattr(dashboard, "model_config", lambda: CONFIG)
+    monkeypatch.setattr(dashboard, "pending", set())
+    with patch.dict(dashboard.app.config, DATABASE=tmp_path / "review.sqlite", KB=tmp_path / "kb.sqlite",
+                    TODAY=date(2026, 11, 27)):
+        yield dashboard.app.test_client()
+
+
+@pytest.fixture
+def case(tmp_path):
+    return seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", SUVA_CASE)
+
+
+def store_draft(key, lang="de", summary="Die Beschwerde wird abgewiesen.", approved=None):
+    record = dashboard.load_record(key)
+    version = dashboard.generation_version(record, CONFIG)
+    with closing(dashboard.connect()) as db, db:
+        db.execute("INSERT INTO results VALUES (?,?,?,?,NULL,?)",
+                   (key, lang, version, json.dumps({"summary": summary, "quotes": []}), approved))
+    return version
+
+
+# --- 1. a job finishing while the dashboard reads must not stop the browser's polling -------------
+
+def test_draft_finishing_during_the_dashboard_read_is_never_reported_as_idle_and_empty(client, case, monkeypatch):
+    dashboard.pending.add((case, "de"))
+    real_get_result = dashboard.get_result
+
+    def job_finishes_right_after_the_read(db, record, kind, config):
+        row = real_get_result(db, record, kind, config)
+        if kind == "de" and (case, "de") in dashboard.pending:
+            store_draft(case)  # the worker commits ...
+            dashboard.pending.discard((case, "de"))  # ... and then clears its flag
+        return row
+
+    monkeypatch.setattr(dashboard, "get_result", job_finishes_right_after_the_read)
+    de = client.get("/api/dashboard", query_string={"case": case}).json["selected"]["de"]
+    assert de["active"] or de["version"]  # either keep polling or already show the draft
+    assert de["active"]  # the flag was read first, so the browser polls once more
+
+
+def test_briefing_finishing_during_the_dashboard_read_keeps_the_browser_polling(client, case, monkeypatch):
+    store_draft(case, approved="Genehmigt.")
+    monkeypatch.setattr("briefing.voice_config", lambda lang: ("key", "voice"))
+    record = dashboard.load_record(case)
+    with closing(dashboard.connect()) as db:
+        key = dashboard.briefing_context(db, record, "de", CONFIG)[0][0]
+    dashboard.pending.add(("briefing", key))
+    finished = []
+
+    class FinishingDb:
+        def __init__(self, db):
+            self.db = db
+
+        def execute(self, sql, params=()):
+            rows = self.db.execute(sql, params)
+            if "FROM briefings" in sql and ("briefing", key) in dashboard.pending:
+                with closing(dashboard.connect()) as other, other:
+                    other.execute("INSERT INTO briefings (cache_key, script, evidence, mp3) VALUES (?,?,?,?)",
+                                  (key, "Skript", "[]", b"ID3"))
+                dashboard.pending.discard(("briefing", key))
+                finished.append(1)
+            return rows
+
+    with closing(dashboard.connect()) as db:
+        status = dashboard.briefing_status(FinishingDb(db), record, "de", CONFIG)
+    assert finished and (status["active"] or status["ready"])
