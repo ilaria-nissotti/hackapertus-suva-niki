@@ -7,7 +7,7 @@ import {displayDate} from './api';
 import type {Dashboard, Language} from './api';
 import './style.css';
 
-const statuses = ['Relevant', 'Review', 'Low relevance', 'Unscored', 'Queued', 'Retry'];
+const statuses = ['Relevant', 'Review', 'Low relevance', 'Stale', 'Unscored'];
 
 function App() {
   const [url, setUrl] = useState(location.search);
@@ -23,11 +23,11 @@ function App() {
   const context = useRef(location.search);
   const actionLock = useRef(false);
   const params = new URLSearchParams(url);
-  const docket = params.get('case');
+  const caseKey = params.get('case');
   const lang: Language = params.get('lang') === 'fr' ? 'fr' : 'de';
   const view = views.find(value => value === params.get('view')) ??
     (location.hash === '#case-briefing' ? 'Legal summaries' : 'Overview');
-  const selected = dashboard?.selected?.docket === docket ? dashboard.selected : null;
+  const selected = dashboard?.selected?.key === caseKey ? dashboard.selected : null;
   const dataParams = new URLSearchParams(url);
   dataParams.delete('view');
   const dataQuery = dataParams.toString();
@@ -77,7 +77,7 @@ function App() {
         setDashboard(data);
         setLoadedQuery(dataQuery);
         setError('');
-        pending = data.active || data.rows.some(row => row.status === 'Queued');
+        pending = data.active;
       } catch {
         if (!abort.signal.aborted) setError('Could not load the review queue. Try again.');
       } finally {
@@ -143,8 +143,9 @@ function App() {
       <dialog ref={dialog} aria-labelledby="add-title" onCancel={event => {if (busy) event.preventDefault();}}>
         <form ref={form} onSubmit={event => {event.preventDefault(); void action('/add', new FormData(event.currentTarget));}}>
           <h2 id="add-title">Add judgment</h2>
-          <p>Look up a case in OpenCaseLaw or upload its original text.</p>
+          <p>Add a judgment from the knowledge base, or upload its original text.</p>
           <label>Case ID<input name="docket" placeholder="8C_123/2026" required/></label>
+          <label>Decision date (needed if the case has several decisions)<input name="decision_date" type="date"/></label>
           <label>Original text file (optional)<input name="text" type="file" accept=".txt,text/plain"/></label>
           <label>Original URL (optional)<input name="source_url" type="url"/></label>
           <label>Publication date (optional)<input name="publication_date" type="date"/></label>
@@ -162,9 +163,11 @@ function App() {
           <div><dt>Shortlisted</dt><dd>{dashboard.shortlist}</dd></div>
         </dl>
         <div className="coverage-dates">
-          <strong>{dashboard.dates ? 'Observed Q2 publications' : 'No dated Q2 judgments imported yet'}</strong>
+          <strong>{dashboard.dates ? 'Observed publications' : 'No dated publications in the window yet'}</strong>
           {dashboard.dates && <span>{displayDate(dashboard.dates[0])} – {displayDate(dashboard.dates[1])}</span>}
-          <small>Target window 1 April–30 June 2026. Mirror coverage may be incomplete.</small>
+          <small>Window: published {displayDate(dashboard.window[0])}–{displayDate(dashboard.window[1])}.
+            {dashboard.unknown_publication > 0 && ` ${dashboard.unknown_publication} with unknown publication date included.`}
+            {dashboard.stale > 0 && ` ${dashboard.stale} scores out of date.`} Source coverage may be incomplete.</small>
         </div>
       </div>}
       {notice && <p className="notice" role="status">{notice}</p>}
@@ -189,26 +192,26 @@ function App() {
           </div>
           <div className="table-wrap"><table>
             <thead><tr><th scope="col">Judgment</th><th scope="col">Published</th><th scope="col">Score</th><th scope="col">Status</th></tr></thead>
-            <tbody>{dashboard.rows.map(row => <tr key={row.docket} className={row.docket === docket ? 'selected' : ''}>
-              <td><a href={link({case: row.docket, view: null})} onClick={follow}
-                aria-current={row.docket === docket ? 'true' : undefined}>{row.docket}</a>
+            <tbody>{dashboard.rows.map(row => <tr key={row.key} className={row.key === caseKey ? 'selected' : ''}>
+              <td><a href={link({case: row.key, view: null})} onClick={follow}
+                aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
                 {(row.issue || row.title !== row.docket) && <div className="topic">{row.issue || row.title}</div>}</td>
-              <td>{displayDate(row.publication_date)}</td><td className="score">{row.score ?? '—'}</td>
+              <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td><td className="score">{row.score ?? '—'}</td>
               <td><Status value={row.status}/></td>
             </tr>)}</tbody>
           </table></div>
           {!dashboard.rows.length && <p className="empty">{dashboard.count ?
-            'No judgments match these filters.' : 'No judgments yet. Add a judgment to start reviewing.'}</p>}
+            'No judgments match these filters.' : 'No judgments in the window. Run python -m suva fetch, parse and score.'}</p>}
           {dashboard.total > 30 && <nav className="pagination" aria-label="Queue pages">
             {dashboard.page > 1 && <a href={link({page: String(dashboard.page - 1)})} onClick={follow}>Previous</a>}
             <span>Page {dashboard.page} of {Math.ceil(dashboard.total / 30)}</span>
             {dashboard.page * 30 < dashboard.total && <a href={link({page: String(dashboard.page + 1)})} onClick={follow}>Next</a>}
           </nav>}
         </section>
-        {selected && <CasePane key={selected.docket} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
+        {selected && <CasePane key={selected.key} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
           selectView={value => navigate(link({view: value}))} selectLanguage={value => navigate(link({lang: value}))}
           close={close} onClose={follow} action={action} busy={busy}/>}
-        {docket && !selected && <section className="panel empty" role="status">{
+        {caseKey && !selected && <section className="panel empty" role="status">{
           loadedQuery === dataQuery ? 'Judgment unavailable.' : error ? 'Judgment could not be loaded.' : 'Loading judgment…'
         } <a href={close} onClick={follow}>Back to queue</a></section>}
       </div>}

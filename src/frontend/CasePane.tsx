@@ -2,7 +2,7 @@ import type {MouseEvent} from 'react';
 import {useEffect, useRef, useState} from 'react';
 import {Conversation} from './Conversation';
 import {displayDate, fields} from './api';
-import type {Action, Briefing, Judgment, Language} from './api';
+import type {Action, Briefing, FiredRule, Judgment, Language} from './api';
 
 export const views = ['Overview', 'Legal summaries', 'Ask this judgment'] as const;
 export type View = typeof views[number];
@@ -14,6 +14,23 @@ export function Status({value}: {value: string}) {
 function Evidence({label, passages}: {label: string; passages?: string[]}) {
   if (!passages?.length) return null;
   return <details><summary>{label}</summary>{passages.map((text, i) => <blockquote key={i}>{text}</blockquote>)}</details>;
+}
+
+const BANDS = {high: 'High relevance: read it', check: 'Check: skim it', low: 'Low relevance: likely skip'};
+
+function Relevance({record}: {record: Judgment}) {
+  const reasons = (sign: 1 | -1) => record.fired.filter(rule => Math.sign(rule.points) === sign);
+  const list = (rules: FiredRule[]) => <ul className="reasons">{rules.map(rule =>
+    <li key={rule.id}><span className="points">{rule.points > 0 ? '+' : ''}{Math.round(rule.points)}</span> {rule.explanation}</li>)}</ul>;
+  if (record.score === null) return <p>Not scored yet. Run <code>python -m suva score</code>.</p>;
+  return <>
+    {!record.score_current && <p role="alert">This score is out of date (rules, parse or text changed). Run <code>python -m suva score</code>.</p>}
+    {record.band && <p><strong>{BANDS[record.band]}</strong></p>}
+    {reasons(1).length > 0 && <><h4>Why it was selected</h4>{list(reasons(1))}</>}
+    {reasons(-1).length > 0 && <><h4>What counts against it</h4>{list(reasons(-1))}</>}
+    {!record.fired.length && <p>No relevance rule matched this judgment.</p>}
+    <p className="muted">Deterministic score from the expert rules in rules/rules.yaml.</p>
+  </>;
 }
 
 function Summary({record, lang, audio, action, busy, visible}: {
@@ -40,7 +57,7 @@ function Summary({record, lang, audio, action, busy, visible}: {
       setSubmitted(undefined);
     }
   }, [result.approved, submitted]);
-  const base = {docket: record.docket, lang};
+  const base = {case: record.key, lang};
   return <>
     <section>
       <h3>Legal summary</h3>
@@ -76,7 +93,7 @@ function Summary({record, lang, audio, action, busy, visible}: {
       <Evidence label="Supporting passages for the draft" passages={result.data.quotes}/>
       {!record.de.active && !record.fr.active && !(record.de.data.summary && record.fr.data.summary) &&
         <button className="primary" disabled={busy}
-          onClick={() => action('/run', fields({docket: record.docket, action: 'summarize'}))}>
+          onClick={() => action('/run', fields({case: record.key, action: 'summarize'}))}>
           {record.de.error || record.fr.error ? 'Retry summaries' : 'Summarize judgment'}
         </button>}
     </section>
@@ -86,7 +103,7 @@ function Summary({record, lang, audio, action, busy, visible}: {
         <>
           <audio key={audio.key} ref={player} controls preload="none"
             aria-label={lang === 'de' ? 'German case briefing' : 'French case briefing'}
-            src={'/briefing/' + audio.key + '.mp3?' + new URLSearchParams({case: record.docket, lang})}/>
+            src={'/briefing/' + audio.key + '.mp3?' + new URLSearchParams({case: record.key, lang})}/>
           <details><summary>Read transcript</summary><p className="source" lang={lang}>{audio.script}</p></details>
           <Evidence label="Supporting passages for the briefing" passages={audio.excerpts}/>
         </> : audio.active ? <p role="status">Generating audio…</p> : !audio.configured ?
@@ -105,7 +122,6 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
   selectView: (view: View) => void; selectLanguage: (lang: Language) => void;
   close: string; onClose: (event: MouseEvent<HTMLAnchorElement>) => void; action: Action; busy: boolean;
 }) {
-  const {triage} = record;
   return <article className="panel case" aria-labelledby="case-title">
     <header className="case-header">
       <a className="back" href={close} onClick={onClose}>Back to queue</a>
@@ -116,7 +132,8 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       </div>
       {record.title !== record.docket && <p className="case-name">{record.title}</p>}
       <dl className="metadata">
-        <div><dt>Published</dt><dd>{displayDate(record.publication_date)}{record.date_source && ' · ' + record.date_source}</dd></div>
+        <div><dt>Published</dt><dd>{record.publication_date ? displayDate(record.publication_date) +
+          (record.date_source ? ' · ' + record.date_source : '') : 'Unknown'}</dd></div>
         <div><dt>Decided</dt><dd>{displayDate(record.decision_date)}</dd></div>
       </dl>
     </header>
@@ -132,15 +149,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       <div hidden={view !== 'Overview'}>
         <section>
           <h3>Relevance to Suva</h3>
-          {triage.active ? <p role="status">Scoring in progress…</p> : triage.error ?
-            <p role="alert">{triage.error}</p> : triage.data.issue ? <>
-              <p><strong>{triage.data.issue}</strong></p><p>{triage.data.reason}</p>
-              {triage.data.quote && <blockquote>{triage.data.quote}</blockquote>}
-            </> : <p>This judgment is waiting to be scored.</p>}
-          {!triage.active && record.score === null && <button className="primary" disabled={busy}
-            onClick={() => action('/run', fields({docket: record.docket, action: 'triage'}))}>
-            {triage.error ? 'Retry scoring' : 'Score judgment'}
-          </button>}
+          <Relevance record={record}/>
         </section>
         <section>
           <h3>Original judgment</h3>
@@ -151,7 +160,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       <div hidden={view !== 'Legal summaries'}>
         <Summary key={lang} record={record} lang={lang} audio={audio} action={action} busy={busy} visible={view === 'Legal summaries'}/>
       </div>
-      {view === 'Ask this judgment' && <Conversation key={lang} docket={record.docket} lang={lang}/>}
+      {view === 'Ask this judgment' && <Conversation key={lang} caseKey={record.key} lang={lang}/>}
     </div>
   </article>;
 }

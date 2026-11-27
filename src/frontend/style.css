@@ -68,6 +68,10 @@ tr.selected { background: #f7eef1 }
 .status.relevant { color: #245639; background: #e3f2e8 }
 .status.review, .status.queued { color: #674600; background: #fcf0ce }
 .status.retry { color: #852e39; background: #fbe7e8 }
+.status.stale { color: #852e39; background: #fbe7e8 }
+.reasons { list-style: none; padding: 0; margin: .4rem 0 }
+.reasons li { margin: .3rem 0 }
+.reasons .points { display: inline-block; min-width: 2.6rem; font-variant-numeric: tabular-nums; font-weight: 700 }
 .pagination, .actions { display: flex; flex-wrap: wrap; gap: .65rem 1rem; align-items: center }
 .pagination { justify-content: center; border-top: 1px solid var(--line); padding: 1rem }
 .empty, .notice { padding: 1rem 1.25rem }

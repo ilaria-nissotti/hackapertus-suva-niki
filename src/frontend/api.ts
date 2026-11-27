@@ -1,13 +1,13 @@
 export type Language = 'de' | 'fr';
 type Result<T> = {data: Partial<T>; error: string | null; approved: string | null; active: boolean};
 export type QueueRow = {
-  docket: string; title: string; publication_date: string | null;
-  score: number | null; status: string; issue?: string;
+  key: string; docket: string; title: string; publication_date: string | null; decision_date: string | null;
+  score: number | null; status: string; issue?: string | null;
 };
+export type FiredRule = {id: string; points: number; explanation: string};
 export type Judgment = Omit<QueueRow, 'issue'> & {
-  decision_date: string | null; date_source: string | null; source_url: string | null;
-  full_text: string;
-  triage: Result<{issue: string; reason: string; quote: string}>;
+  date_source: string | null; source_url: string | null; full_text: string;
+  band: 'high' | 'check' | 'low' | null; fired: FiredRule[]; score_current: boolean;
   de: Result<{summary: string; quotes: string[]}>;
   fr: Result<{summary: string; quotes: string[]}>;
 };
@@ -15,7 +15,8 @@ export type Briefing = {key?: string; active?: boolean; configured?: boolean; re
   error?: string; script?: string; excerpts?: string[]};
 export type Dashboard = {
   rows: QueueRow[]; selected: Judgment | null; count: number; total: number;
-  scored: number; shortlist: number; dates: [string, string] | null; model: string;
+  scored: number; shortlist: number; stale: number; unknown_publication: number;
+  window: [string, string]; dates: [string, string] | null; model: string;
   page: number; lang: Language; audio: Briefing; active: boolean;
 };
 export type Action = (endpoint: string, body: FormData, onError?: (message: string) => void) => Promise<boolean>;

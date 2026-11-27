@@ -2,12 +2,12 @@ import {useEffect, useRef} from 'react';
 import {mountConversation} from './conversation-controller.mjs';
 import type {Language} from './api';
 
-export function Conversation({docket, lang}: {docket: string; lang: Language}) {
+export function Conversation({caseKey, lang}: {caseKey: string; lang: Language}) {
   const root = useRef<HTMLElement>(null);
   useEffect(() => {
     if (root.current) return mountConversation(root.current);
-  }, [docket, lang]);
-  return <section ref={root} aria-labelledby="conversation-heading" data-case={docket} data-lang={lang}
+  }, [caseKey, lang]);
+  return <section ref={root} aria-labelledby="conversation-heading" data-case={caseKey} data-lang={lang}
     data-transcribe="/conversation/transcribe" data-ask="/conversation/ask"
     data-speak="/conversation/speak" data-recap="/conversation/recap">
     <h3 id="conversation-heading">Ask this judgment</h3>
