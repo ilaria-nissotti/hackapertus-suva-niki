@@ -54,9 +54,9 @@ def test_fetch_window_picks_gaps_and_html(tmp_path, repo):
     assert (rep.opencaselaw, rep.entscheidsuche) == (2, 2)
     assert (rep.picks_requested, rep.picks_found, rep.picks_missing) == (1, 1, [])
     assert rep.new_judgements == 4 and rep.html_fetched == 1 and rep.errors == []
-    gap = repo.get_judgement("8C_3/2025#2025-10-04")
+    gap = repo.get_judgement("8C_3/2025@2025-10-04")
     assert gap["text"] is None  # listed by entscheidsuche only
-    pick = repo.get_judgement("8C_9/2024#2024-05-05")
+    pick = repo.get_judgement("8C_9/2024@2024-05-05")
     assert pick["text"] and pick["html_path"]
     assert len(html_calls) == 1
 

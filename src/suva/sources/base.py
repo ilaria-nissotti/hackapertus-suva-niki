@@ -5,8 +5,15 @@ from datetime import date
 
 
 def judgement_key(docket: str, decision_date: date | None) -> str:
-    """One docket can carry several decisions, so the key is docket + decision date."""
-    return f"{docket}#{decision_date.isoformat() if decision_date else 'unknown'}"
+    """One docket can carry several decisions, so the key is docket + decision date.
+
+    Same format as suva.ingest.exports.decision_id ('8C_129/2025@2025-11-11'), so
+    example summaries and judgements join directly. '#' stays reserved for
+    passage ids ('8C_129/2025@2025-11-11#E.3.2').
+    """
+    from suva.ingest.exports import decision_id
+
+    return decision_id(docket, decision_date.isoformat() if decision_date else None)
 
 
 @dataclass

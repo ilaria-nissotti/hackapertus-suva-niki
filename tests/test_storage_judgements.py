@@ -11,7 +11,7 @@ def rec(source="opencaselaw", text="kurz", pub=None, d=date(2025, 11, 11), **kw)
 def test_new_then_merge_keeps_best_data(repo):
     assert repo.upsert_judgement(rec(text="kurz")) is True
     assert repo.upsert_judgement(rec(source="entscheidsuche", text=None, html_url="https://e/x.html")) is False
-    j = repo.get_judgement("8C_129/2025#2025-11-11")
+    j = repo.get_judgement("8C_129/2025@2025-11-11")
     assert j["text"] == "kurz" and j["text_source"] == "opencaselaw" and j["chamber_prefix"] == "8C"
     assert [s["source"] for s in repo.judgement_sources(j["key"])] == ["entscheidsuche", "opencaselaw"]
 
@@ -19,14 +19,14 @@ def test_new_then_merge_keeps_best_data(repo):
 def test_text_only_replaced_by_longer(repo):
     repo.upsert_judgement(rec(text="a much longer text"))
     repo.upsert_judgement(rec(text="short"))
-    assert repo.get_judgement("8C_129/2025#2025-11-11")["text"] == "a much longer text"
+    assert repo.get_judgement("8C_129/2025@2025-11-11")["text"] == "a much longer text"
 
 
 def test_publication_date_fills_unknown_only(repo):
     repo.upsert_judgement(rec(pub=None))
     repo.upsert_judgement(rec(pub=date(2025, 12, 1)))
     repo.upsert_judgement(rec(pub=date(2026, 1, 1)))
-    j = repo.get_judgement("8C_129/2025#2025-11-11")
+    j = repo.get_judgement("8C_129/2025@2025-11-11")
     assert j["publication_date"] == "2025-12-01" and j["publication_date_source"] == "opencaselaw"
 
 
@@ -46,5 +46,20 @@ def test_list_filters_and_no_text_column(repo):
 
 def test_set_html_path(repo):
     repo.upsert_judgement(rec())
-    repo.set_html_path("8C_129/2025#2025-11-11", "data/raw/x.html")
-    assert repo.get_judgement("8C_129/2025#2025-11-11")["html_path"] == "data/raw/x.html"
+    repo.set_html_path("8C_129/2025@2025-11-11", "data/raw/x.html")
+    assert repo.get_judgement("8C_129/2025@2025-11-11")["html_path"] == "data/raw/x.html"
+
+
+def test_key_matches_example_decision_id():
+    from suva.ingest.exports import decision_id
+    from suva.sources.base import judgement_key
+
+    assert judgement_key("8C_129/2025", date(2025, 11, 11)) == decision_id("8C_129/2025", "2025-11-11")
+    assert judgement_key("8C_129/2025", None) == "8C_129/2025"
+
+
+def test_migrations_numbered_uniquely():
+    from suva.storage.migrations import MIGRATIONS
+
+    numbers = [name.split("_", 1)[0] for name, _ in MIGRATIONS]
+    assert numbers == sorted(numbers) and len(set(numbers)) == len(numbers)

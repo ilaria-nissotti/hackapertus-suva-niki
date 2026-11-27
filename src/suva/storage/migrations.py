@@ -71,11 +71,11 @@ MIGRATIONS: list[tuple[str, str]] = [
         """,
     ),
     (
-        "003_judgements_and_sources",
+        "004_judgements_and_sources",
         """
         -- One row per decision (docket + decision date). Text is plain full text.
         CREATE TABLE judgements (
-            key                     TEXT PRIMARY KEY,   -- '8C_129/2025#2025-11-11'
+            key                     TEXT PRIMARY KEY,   -- '8C_129/2025@2025-11-11'
             docket                  TEXT NOT NULL,
             decision_date           TEXT,
             chamber_prefix          TEXT,               -- '8C' (a feature, never a gate)

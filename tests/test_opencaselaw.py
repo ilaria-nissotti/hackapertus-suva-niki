@@ -30,7 +30,7 @@ def test_date_filter_and_fields(tmp_path):
     recs = list(read_bger(p, date(2025, 10, 1), date(2026, 3, 31)))
     assert [r.docket for r in recs] == ["8C_1/2025"]
     r = recs[0]
-    assert r.key == "8C_1/2025#2025-10-01"
+    assert r.key == "8C_1/2025@2025-10-01"
     assert r.publication_date == date(2025, 10, 20) and r.text == "Erwägungen"
 
 
