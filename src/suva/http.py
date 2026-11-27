@@ -15,6 +15,7 @@ import httpx
 USER_AGENT = "suva-bger-hackathon/0.1 (HackApertus research prototype; polite, 1 req/2s per host)"
 MIN_INTERVAL = 2.0
 RETRY_STATUS = {429, 500, 502, 503, 504}
+MAX_RETRY_DELAY = 300.0  # seconds: a huge or far-future Retry-After must not stall or crash the fetch
 log = logging.getLogger(__name__)
 
 
@@ -76,6 +77,7 @@ class PoliteClient:
                             delay = max(delay, (retry_at - datetime.now(timezone.utc)).total_seconds())
                     except (ValueError, OverflowError):
                         log.debug("http_retry_after_unparsed host=%s", resp.request.url.host)
+                delay = min(delay, MAX_RETRY_DELAY)
                 log.warning("http_retry method=%s host=%s attempt=%d status=%d delay_s=%.1f", method,
                             resp.request.url.host, attempt + 1, resp.status_code, delay)
                 self.sleep(delay)

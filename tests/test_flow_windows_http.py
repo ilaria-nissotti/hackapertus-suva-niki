@@ -220,3 +220,27 @@ def test_sha256_is_stable_and_key_order_independent():
     assert sha256({"a": 1, "b": [1, "ä"]}) == sha256({"b": [1, "ä"], "a": 1})
     assert sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     assert sha256("") != sha256([]) != sha256(None)
+
+
+@pytest.mark.parametrize("retry_after", ["9" * 400, "99999999999", "Fri, 31 Dec 9999 23:59:59 GMT"])
+def test_huge_retry_after_is_capped_instead_of_crashing(retry_after):
+    from suva.http import MAX_RETRY_DELAY
+
+    responses = iter([httpx.Response(429, headers={"Retry-After": retry_after}), httpx.Response(200, json={"ok": 1})])
+    sleeps = []
+    c = PoliteClient(transport=httpx.MockTransport(lambda r: next(responses)), sleep=sleeps.append)
+    assert c.get("https://example.test/x").json() == {"ok": 1}
+    assert max(sleeps) == MAX_RETRY_DELAY == 300.0
+
+
+def like_time_sleep(seconds):
+    """Mimic time.sleep's limits without waiting: it overflows on inf and on values beyond a C timeval."""
+    if not seconds < 2**31:
+        raise OverflowError("sleep length is too large")
+
+
+def test_huge_retry_after_on_every_attempt_ends_in_the_normal_http_error():
+    c = PoliteClient(transport=httpx.MockTransport(lambda r: httpx.Response(503, headers={"Retry-After": "9" * 400})),
+                     sleep=like_time_sleep, retries=2)
+    with pytest.raises(httpx.HTTPStatusError):  # the error fetch() already turns into a source failure
+        c.get("https://example.test/x")
