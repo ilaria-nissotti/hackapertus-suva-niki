@@ -117,3 +117,20 @@ def test_crash_for_an_unknown_case_is_only_logged(client, case, monkeypatch, cap
     monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
     assert dashboard.run_summary_job("8C_404/2026@2026-10-01", "de") is False
     assert "summary_job_crashed" in caplog.text and "summary_error_not_stored" not in caplog.text
+
+
+# --- 9. summarize-top picks the same cases, in the same order, as the dashboard ------------------
+
+def test_summarize_top_breaks_capped_score_ties_by_points_like_the_dashboard(client, tmp_path, monkeypatch):
+    from suva.storage import SQLiteRepository
+
+    keys = [seed_kb(tmp_path / "kb.sqlite", f"8C_{i}/2026", SUVA_CASE, score=100.0, band="high") for i in (1, 2, 3)]
+    repo = SQLiteRepository(tmp_path / "kb.sqlite")
+    repo.save_scores([repo.get_score(k) | {"points": p} for k, p in zip(keys, (400, 600, 368))])
+    repo.close()
+    drafted = []
+    monkeypatch.setattr(dashboard, "run_summary_job", lambda key, lang: drafted.append(key) or True)
+    assert dashboard.summarize_top(1, 1) == 0
+    assert set(drafted) == {keys[1]}  # 600 points ranks first, as on the dashboard
+    shown = [r["key"] for r in client.get("/api/dashboard").json["rows"]]
+    assert shown[0] == keys[1]

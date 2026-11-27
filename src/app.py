@@ -520,7 +520,7 @@ def summarize_top(limit, workers):
     with closing(kb()) as repo:
         records = review_kb.window_records(repo, window())
     ranked = sorted((r for r in records if r["status"] in ("Relevant", "Review")),
-                    key=lambda r: -r["score"])[:limit]
+                    key=lambda r: (-r["score"], -(r["points"] or 0)))[:limit]  # same order as the dashboard
     stale = sum(r["status"] == "Stale" for r in records)
     if stale:
         print(f"note: {stale} judgements have stale scores: run `python -m suva score` first", file=sys.stderr)
