@@ -116,7 +116,8 @@ class _FetchRun:
                     in_window = window.includes_publication(published)
                     if in_window or rec.docket in self.dockets:
                         self.record(rec, in_window=in_window)
-                        self.decisions[rec.key].publication = published
+                        if published:
+                            self.decisions[rec.key].publication = published
                 progress["ranges"].append([start.isoformat(), end.isoformat()])
 
             dates = {parse_iso_date(label["ref"].partition("@")[2]) for label in self.labels}
