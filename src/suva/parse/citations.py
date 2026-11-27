@@ -61,7 +61,9 @@ class Citation:
     consideration: str | None = None  # BGE "E. 2.1"
 
 
-def extract(text: str, self_docket: str | None = None) -> list[Citation]:
+def extract(text: str, self_docket: str | None = None, self_bge: str | None = None) -> list[Citation]:
+    """All citations in text, skipping the decision's own docket and own BGE reference
+    (a BGE print carries page markers like 'BGE 151 V 1 S. 3' on every page)."""
     out: list[Citation] = []
     for m in ART_RE.finditer(text):
         law = ALIAS[m["law"]]
@@ -74,6 +76,8 @@ def extract(text: str, self_docket: str | None = None) -> list[Citation]:
             out.append(Citation("statute", canon, m.group(0), m.start(), m.end(), law=law, article=article))
     for m in BGE_RE.finditer(text):
         canon = f"BGE {m['vol']} {m['part']} {m['page']}"
+        if canon == self_bge:
+            continue
         out.append(Citation("bge", canon, m.group(0), m.start(), m.end(), consideration=m["cons"]))
     for m in DOCKET_RE.finditer(text):
         docket = m.group()

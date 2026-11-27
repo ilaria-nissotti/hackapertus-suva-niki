@@ -48,3 +48,9 @@ def test_grouped_articles_keep_shared_source_span():
     citations = extract(text)
     assert [citation.canonical for citation in citations] == ["Art. 4 UVG", "Art. 6 UVG", "Art. 9 UVG"]
     assert all(text[c.start:c.end] == "ART. 4, 6 et 9 LAA" for c in citations)
+
+
+def test_own_bge_page_markers_skipped():
+    t = "6.2 Wie in BGE 134 V 109 E. 2.1 festgehalten. BGE 151 V 1 S. 4 Weiter."
+    assert canon(t, self_bge="BGE 151 V 1") == ["BGE 134 V 109"]
+    assert canon(t) == ["BGE 134 V 109", "BGE 151 V 1"]

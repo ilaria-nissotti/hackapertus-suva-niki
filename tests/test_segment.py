@@ -200,3 +200,58 @@ def test_singular_german_reason_heading():
     result = segment("k", DE.replace("Erwägungen:", "Erwägung:"))
     assert result.status == "ok"
     assert "E.2.2" in ids(result)
+
+
+BGE_DE = """Urteilskopf
+
+151 V 1
+
+1. Auszug aus dem Urteil der III. öffentlich-rechtlichen Abteilung i.S. A. gegen X. Versicherung (Beschwerde)
+
+9C_480/2022 vom 29. August 2024
+
+Regeste
+
+Art. 69 Abs. 1 ATSG; Kongruenz der Leistungen.
+
+Die Hilflosenentschädigung ist nicht anzurechnen (E. 6).
+
+Sachverhalt ab Seite 3
+
+    BGE 151 V 1 S. 3
+
+    A. Die Versicherte leidet an einer Erkrankung.
+
+Erwägungen
+
+Aus den Erwägungen:
+
+6.
+
+6.1 Nach Art. 69 Abs. 1 ATSG darf das Zusammentreffen von Leistungen nicht zu einer Überentschädigung führen.
+
+6.2 An dieser Sichtweise ist nicht festzuhalten. BGE 151 V 1 S. 4
+
+7. Die Beschwerde ist begründet.
+""" + ("Weitere Erwägung. " * 60)
+
+
+def test_bge_extract_layout():
+    s = segment("9C_480/2022@2024-08-29", BGE_DE)
+    assert s.status == "ok", s.issues
+    assert ids(s) == ["header", "regeste", "facts", "reasons", "E.6", "E.6.1", "E.6.2", "E.7"]
+    assert "bge_extract" in s.issues and "no_dispositiv" not in s.issues  # extracts omit the Dispositiv
+    assert s.passages[1].text.startswith("Regeste\n\nArt. 69 Abs. 1 ATSG")
+
+
+def test_bge_extract_reasons_with_page_and_no_facts():
+    t = BGE_DE.replace(BGE_DE[BGE_DE.index("Sachverhalt ab Seite 3"):BGE_DE.index("Erwägungen\n")], "")
+    t = t.replace("Erwägungen\n\nAus den Erwägungen:", "Erwägungen ab Seite 343\n\n    BGE 151 V 1 S. 343\n\nAus den Erwägungen:")
+    s = segment("k", t)
+    assert s.status == "ok" and ids(s)[:4] == ["header", "regeste", "reasons", "E.6"]
+
+
+def test_extract_start_rule_only_for_bge():
+    # an ordinary judgement must still start at E. 1: "6." right after the heading is not trusted
+    t = DE.replace("Erwägungen:\n\n1.\n\n", "Erwägungen:\n\n6.\n\n")
+    assert "E.6" not in ids(segment("k", t))
