@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from suva.config import load_settings
@@ -17,6 +19,28 @@ def make_settings(tmp_path, **overrides):
     }
     env.update(overrides)
     return load_settings(environ=env)
+
+
+class FakeCompletions:
+    def __init__(self, reply="Bereit", fail=None):
+        self.calls = []
+        self.reply = reply
+        self.fail = fail
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail:
+            raise self.fail
+        return SimpleNamespace(
+            model=kwargs["model"],
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self.reply))],
+            usage=SimpleNamespace(prompt_tokens=7, completion_tokens=1),
+        )
+
+
+def fake_client(**kw):
+    completions = FakeCompletions(**kw)
+    return SimpleNamespace(chat=SimpleNamespace(completions=completions)), completions
 
 
 @pytest.fixture
