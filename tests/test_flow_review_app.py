@@ -395,17 +395,23 @@ def test_process_unknown_case_returns_false(client, case):
     assert dashboard.process("8C_404/2026@2026-10-01", "de", config=CONFIG) is False
 
 
-def test_process_provider_error_with_status_code(client, case, monkeypatch):
-    def fail(config, text):
-        exc = OSError("boom")
-        exc.code = 503
-        raise exc
+def test_process_shows_the_provider_status_from_bger_chat(client, case, monkeypatch):
+    import httpx
+    from openai import APIStatusError
 
-    monkeypatch.setattr(dashboard, "make_facts", fail)
-    assert not dashboard.process(case, "facts", config=CONFIG)
-    # BUG: this "Provider HTTP <code>" branch is unreachable in practice: bger.chat turns every
-    # APIError into a plain OSError without `.code`. Expected: bger.chat keeps the status, or the
-    # branch is removed. The message here only shows up because the test adds `.code` by hand.
+    import bger
+
+    class FakeLLM:
+        def __init__(self, settings):
+            self.client = httpx.Client()
+
+        def chat(self, *a, **k):
+            request = httpx.Request("POST", "https://x.test")
+            raise APIStatusError("busy", response=httpx.Response(503, request=request), body=None)
+
+    monkeypatch.setattr(bger, "LLMClient", FakeLLM)
+    monkeypatch.setattr(dashboard, "make_facts", lambda config, text: bger.chat(config, [], 10))
+    assert not dashboard.process(case, "facts", config=CONFIG | {"settings": None})
     assert result_row(case, "facts")["error"] == "Provider HTTP 503"
 
 

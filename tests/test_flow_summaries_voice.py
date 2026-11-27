@@ -237,6 +237,26 @@ def test_chat_maps_api_errors_to_oserror(monkeypatch):
     with pytest.raises(OSError, match="^Apertus request failed$") as exc:
         bger.chat({"settings": None}, [], 10)
     assert exc.value.__cause__ is None  # provider details are dropped on purpose
+    assert not hasattr(exc.value, "code")  # no status: the app shows its generic retry message
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_chat_keeps_the_provider_status_code(monkeypatch, status):
+    import httpx
+    from openai import APIStatusError
+
+    class FakeLLM:
+        def __init__(self, settings):
+            self.client = httpx.Client()
+
+        def chat(self, *a, **k):
+            request = httpx.Request("POST", "https://x.test")
+            raise APIStatusError("secret detail", response=httpx.Response(status, request=request), body=None)
+
+    monkeypatch.setattr(bger, "LLMClient", FakeLLM)
+    with pytest.raises(OSError, match=f"^Apertus HTTP {status}$") as exc:
+        bger.chat({"settings": None}, [], 10)
+    assert exc.value.code == status and exc.value.__cause__ is None
 
 
 def test_local_config_reads_env_file_and_environment_wins(tmp_path, monkeypatch):

@@ -51,4 +51,7 @@ def chat(config, messages, max_tokens):
             return llm.chat(messages, prompt_version="review-json", max_tokens=max_tokens).text
     except APIError as exc:
         status = getattr(exc, "status_code", None)
-        raise OSError(f"Apertus HTTP {status}" if status else "Apertus request failed") from None
+        error = OSError(f"Apertus HTTP {status}" if status else "Apertus request failed")
+        if status:
+            error.code = status  # app.process shows "Provider HTTP <code>"
+        raise error from None
