@@ -23,9 +23,10 @@ from flask import Flask, abort, jsonify, redirect, request, send_file, send_from
 import briefing
 import conversation
 import review_kb
-from bger import CASE_ID, ROOT, model_config
+from bger import ROOT, model_config
 from summaries import VERSION, draft, make_facts
 from suva.config import load_settings
+from suva.sources.base import DOCKET_RE
 
 PAGE = 30
 _settings = load_settings()
@@ -405,7 +406,7 @@ def add_case():
     docket = request.form.get("docket", "").strip()
     upload = request.files.get("text")
     try:
-        if not CASE_ID.fullmatch(docket):
+        if not DOCKET_RE.fullmatch(docket):
             raise ValueError("Enter a Swiss case ID such as 8C_123/2026.")
         decided = valid_date(request.form.get("decision_date"))
         with closing(kb()) as repo:
