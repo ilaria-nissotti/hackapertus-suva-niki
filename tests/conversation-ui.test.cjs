@@ -24,7 +24,7 @@ function setup({denyMic = false, blockAutoplay = false, request, recording} = {}
   root.querySelector = selector => byId(selector.slice(1));
   root.dataset = {case: "8C_354/2026", lang: "de", ask: "ask",
     speak: "speak", transcribe: "transcribe", recap: "recap"};
-  const calls = [], events = {};
+  const calls = [], events = {}, logs = [];
   let tracksStopped = 0, pauses = 0, revoked = 0, stopTimer;
   class Recorder {
     static isTypeSupported() { return true; }
@@ -45,6 +45,7 @@ function setup({denyMic = false, blockAutoplay = false, request, recording} = {}
     clearTimeout() {}, setTimeout: fn => { stopTimer = fn; }};
   const dispose = runInNewContext(readFileSync("src/frontend/conversation-controller.mjs", "utf8").replace("export function", "function") + "\nmountConversation(root);", {
     root,
+    console: {warn: (...args) => logs.push(["warn", ...args]), info: (...args) => logs.push(["info", ...args])},
     window, MediaRecorder: Recorder, Audio: Player, AbortController, FormData, Blob,
     URL: {createObjectURL: () => "blob:demo", revokeObjectURL: () => revoked++},
     document: {querySelector: () => root, getElementById: byId, createElement: () => new Element()},
@@ -64,7 +65,7 @@ function setup({denyMic = false, blockAutoplay = false, request, recording} = {}
       return {ok: true, async json() { return data ?? defaults[action]; }, async blob() { return new Blob(["audio"]); }};
     },
   });
-  return {byId, calls, events, dispose, tracks: () => tracksStopped,
+  return {byId, calls, events, logs, dispose, tracks: () => tracksStopped,
     pauses: () => pauses, revoked: () => revoked, timeout: () => stopTimer(),
     async record() { await byId("chat-mic").click(); await byId("chat-mic").click(); }};
 }
@@ -256,4 +257,23 @@ test("network: a dropped connection shows the error and the next attempt works",
   await ui.record();
   await flush();
   assert.equal(ui.byId("chat-turns").children.length, 1);
+});
+
+test("observability: failures are logged with the step and case, never the question or answer", async () => {
+  const ui = setup({request: action => action === "ask" ? {error: "Apertus could not complete this request."} : undefined});
+  await ui.record();
+  await flush();
+  const [level, event, details] = ui.logs.find(entry => entry[1] === "conversation_failed");
+  assert.equal(level, "warn");
+  assert.equal(event, "conversation_failed");
+  assert.deepEqual(JSON.parse(JSON.stringify(details)), {step: "question", case: "8C_354/2026", lang: "de",
+    reason: "Apertus could not complete this request."});
+  assert.ok(!JSON.stringify(ui.logs).includes("Was entschied das Gericht?"));  // the transcript stays out of logs
+  const blocked = setup({blockAutoplay: true});
+  await blocked.record();
+  await flush();
+  assert.ok(blocked.logs.some(entry => entry[1] === "conversation_autoplay_blocked"));
+  const denied = setup({denyMic: true});
+  await denied.byId("chat-mic").click();
+  assert.equal(denied.logs[0][2].step, "microphone");
 });

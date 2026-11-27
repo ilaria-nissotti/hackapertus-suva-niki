@@ -18,6 +18,11 @@ export function mountConversation(root) {
     else tabHistory.delete(storageKey);
   }
 
+  // Never log questions, transcripts, answers or audio: only the step, the case and the error reason.
+  function report(step, error) {
+    console.warn("conversation_failed", {step, case: scope.case, lang: scope.lang, reason: error?.message ?? String(error)});
+  }
+
   function element(tag, text) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
@@ -129,7 +134,8 @@ export function mountConversation(root) {
         root.setAttribute("data-chat-playing", "");
         status.textContent = "Speaking…";
       }
-    } catch (_) {
+    } catch (error) {
+      console.info("conversation_autoplay_blocked", {case: scope.case, reason: error?.message});
       if (token === epoch) status.textContent = "Select Play answer to listen.";
     }
   }
@@ -140,7 +146,7 @@ export function mountConversation(root) {
     controller = new AbortController();
     setBusy(true);
     try { await speak(turn, token, controller.signal); }
-    catch (error) { if (token === epoch) status.textContent = error.message; }
+    catch (error) { report("speak", error); if (token === epoch) status.textContent = error.message; }
     finally { if (token === epoch) setBusy(false, status.textContent); }
   }
 
@@ -177,6 +183,7 @@ export function mountConversation(root) {
       if (token !== epoch) return;
       await ask(transcript, token, signal);
     } catch (error) {
+      report("question", error);
       if (token === epoch) status.textContent = error.message;
     } finally {
       if (token === epoch) { pendingQuestion = ""; setBusy(false, status.textContent); }
@@ -220,7 +227,8 @@ export function mountConversation(root) {
       current.start();
       timer = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 30000);
       setBusy(true, "Listening… Select Send question when you’re done.");
-    } catch (_) {
+    } catch (error) {
+      report("microphone", error);
       if (token !== epoch) return;
       releaseMic();
       recorder = undefined;
@@ -253,7 +261,7 @@ export function mountConversation(root) {
     try {
       const result = await call("recap", {history: history()}, controller.signal);
       if (token === epoch) { recap = result; status.textContent = ""; }
-    } catch (error) { if (token === epoch) status.textContent = error.message; }
+    } catch (error) { report("recap", error); if (token === epoch) status.textContent = error.message; }
     finally { if (token === epoch) setBusy(false, status.textContent); }
   });
   for (const tab of ["chat", "recap"]) {

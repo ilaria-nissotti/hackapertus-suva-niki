@@ -71,15 +71,18 @@ function App() {
     async function load() {
       try {
         const response = await fetch('/api/dashboard?' + dataQuery, {signal: abort.signal});
-        if (!response.ok) throw new Error();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data: Dashboard = await response.json();
         if (abort.signal.aborted) return;
         setDashboard(data);
         setLoadedQuery(dataQuery);
         setError('');
         pending = data.active;
-      } catch {
-        if (!abort.signal.aborted) setError('Could not load the review queue. Try again.');
+      } catch (failure) {
+        if (!abort.signal.aborted) {
+          console.warn('dashboard_load_failed', {reason: String(failure)});
+          setError('Could not load the review queue. Try again.');
+        }
       } finally {
         if (!abort.signal.aborted && pending) timer = window.setTimeout(load, 8000);
       }
@@ -111,6 +114,7 @@ function App() {
       return true;
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : 'Could not complete the request.';
+      console.warn('action_failed', {endpoint, reason: message});
       if (endpoint === '/add') setAddError(message);
       else if (onError) onError(message);
       else if (start === context.current) setNotice(message);
