@@ -6,11 +6,13 @@ is what the review app shows.
 
 from collections import Counter
 import json
+import logging
 import re
 
 from bger import chat
 
 VERSION = "suva-4"
+log = logging.getLogger(__name__)  # never log judgment text, prompts or model output
 
 # Frequent grammatical words distinguish the two supported summary languages
 # without counting shared case names, citations or legal abbreviations.
@@ -41,9 +43,12 @@ def ask(config, instruction, data, tokens=900, *, request=""):
             try:
                 result, _ = json.JSONDecoder().raw_decode(response, start)
             except json.JSONDecodeError:
+                log.warning("apertus_reply_invalid attempt=%d reason=bad_json chars=%d", attempt + 1, len(response))
                 continue
             if isinstance(result, dict):
                 return result
+        log.warning("apertus_reply_invalid attempt=%d reason=no_json_object chars=%s", attempt + 1,
+                    len(response) if isinstance(response, str) else None)
     raise ValueError("Apertus did not return a valid JSON object")
 
 
@@ -93,11 +98,15 @@ in the source."""
         except ValueError:
             if request:
                 raise
+            log.info("facts_retry reason=no_json")
             continue
         result["quotes"] = resolve_passages(source_passages, result.pop("evidence_ids", None))[:4]
         if (all(result.get(k) for k in ("facts", "issues", "reasoning", "outcome"))
                 and result["quotes"] and all(has_quote(source, q) for q in result["quotes"])):
             return result
+        log.info("facts_rejected attempt=%d reason=%s", 2 if request else 1,
+                 "missing_fields" if not all(result.get(k) for k in ("facts", "issues", "reasoning", "outcome"))
+                 else "unverified_quotes")
     raise ValueError("Apertus factual brief could not be verified")
 
 
@@ -131,9 +140,13 @@ the central reasoning). The first output character must be {{."""
         except ValueError:
             if reminder:
                 raise
+            log.info("draft_retry case=%s lang=%s reason=no_json", record.get("key", record.get("docket")), lang)
             continue
         result["quotes"] = resolve_passages(source_passages, result.pop("evidence_ids", None))[:4]
         summary = result.get("summary")
         if isinstance(summary, str) and has_summary_language(summary, lang) and result["quotes"]:
             return result
+        log.info("draft_rejected case=%s lang=%s attempt=%d reason=%s", record.get("key", record.get("docket")), lang, 2 if reminder else 1,
+                 "no_summary" if not isinstance(summary, str) else
+                 "wrong_language" if not has_summary_language(summary, lang) else "no_evidence")
     raise ValueError(f"{lang.upper()} draft needs the requested language and verifiable source evidence")

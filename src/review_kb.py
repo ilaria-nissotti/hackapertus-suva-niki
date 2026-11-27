@@ -7,6 +7,7 @@ explanation. This module turns those rows into the records the app shows. A reco
 """
 
 from datetime import date
+import logging
 from pathlib import Path
 
 from suva.parse.run import parse_all
@@ -19,12 +20,14 @@ from suva.storage.sqlite import SQLiteRepository
 from suva.windows import Window, challenge_window
 
 STATUS = {"high": "Relevant", "check": "Review", "low": "Low relevance"}
+log = logging.getLogger(__name__)
 
 
 def open_kb(path):
     repo = SQLiteRepository(Path(path))
     if not repo.schema_is_current():
-        repo.migrate()
+        applied = repo.migrate()
+        log.info("kb_migrated path=%s applied=%s", path, ",".join(applied) or "none")
     return repo
 
 

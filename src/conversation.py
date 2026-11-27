@@ -1,6 +1,7 @@
 """Case-specific question answering with optional speech input and output."""
 
 import json
+import logging
 import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -13,6 +14,7 @@ from bger import model_config
 from briefing import LANGUAGES, narrate, voice_config
 from summaries import ask, passages
 
+log = logging.getLogger(__name__)  # never log questions, transcripts, answers or audio
 MAX_UPLOAD = 3 * 1024 * 1024
 FORMATS = {"audio/webm": "webm", "video/webm": "webm", "audio/mp4": "mp4",
            "video/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mpeg": "mp3"}
@@ -120,7 +122,8 @@ invented findings, cross-case claims, or actions. History is context only.""",
         if kind == "score":
             label = "App-Bewertung" if lang == "de" else "Score de l’application"
             answer = bounded(f"{label} ({rating['score']}/100). {answer}", MAX_ANSWER)
-    except (ValueError, KeyError):
+    except (ValueError, KeyError) as exc:
+        log.info("conversation_answer_fallback case=%s kind=%r reason=%s", record.get("key"), kind, exc)
         answer = ("Das lässt sich anhand dieses Urteils nicht verlässlich beantworten."
                   if lang == "de" else "Ce jugement ne permet pas de répondre de manière fiable.")
         kind, evidence = "uncertain", []
@@ -194,6 +197,7 @@ def routes(load_record):
                 elif not history:
                     raise ValueError("Ask a question before generating a summary.")
         except ValueError as exc:
+            log.info("conversation_rejected action=%s case=%s reason=%s", action, key, exc)
             return jsonify(error=str(exc)), 400
 
         provider = "ElevenLabs" if action in ("transcribe", "speak") else "Apertus"
@@ -210,10 +214,14 @@ def routes(load_record):
                 return jsonify(recap(config, record, lang, history))
             return jsonify(discuss(config, record, lang, question, history, app_score(record)))
         except HTTPError as exc:
+            log.warning("conversation_provider_failed action=%s case=%s provider=%s http=%s", action, record["key"],
+                        provider, exc.code)
             if action == "transcribe" and exc.code in (401, 403):
                 return jsonify(error="ElevenLabs denied transcription. Check Speech to Text access on the API key."), 502
             return jsonify(error=f"{provider} returned HTTP {exc.code}. Try again."), 502
-        except (TimeoutError, URLError, OSError, ValueError, TypeError, KeyError):
+        except (TimeoutError, URLError, OSError, ValueError, TypeError, KeyError) as exc:
+            log.warning("conversation_provider_failed action=%s case=%s provider=%s error=%s", action,
+                        record["key"], provider, type(exc).__name__)
             message = ("Could not transcribe that recording. Try again or type your question."
                        if action == "transcribe" else f"{provider} could not complete this request. Try again.")
             return jsonify(error=message), 502

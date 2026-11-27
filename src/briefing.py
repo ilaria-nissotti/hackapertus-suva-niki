@@ -4,6 +4,7 @@ from contextlib import closing
 import fcntl
 import hashlib
 import json
+import logging
 from pathlib import Path
 import re
 from urllib.error import HTTPError
@@ -16,6 +17,7 @@ PROMPT_VERSION = "briefing-2"
 VOICE_MODEL = "eleven_multilingual_v2"
 LANGUAGES = {"de": "Swiss Standard German", "fr": "Swiss French"}
 MAX_AUDIO = 4 * 1024 * 1024
+log = logging.getLogger(__name__)
 
 
 def voice_config(lang):
@@ -97,10 +99,13 @@ def generate(connect, database, key, record, approved, lang, config, api_key, vo
             audio = narrate(script, api_key, voice)
             with db:
                 db.execute("UPDATE briefings SET mp3=?, error=NULL WHERE cache_key=?", (audio, key))
+            log.info("briefing_ready case=%s lang=%s cache_key=%s bytes=%d", record["key"], lang, key[:12], len(audio))
             return True
         except (OSError, ValueError, TypeError, KeyError) as exc:
             error = (f"{stage} returned HTTP {exc.code}" if isinstance(exc, HTTPError)
                      else f"{stage} could not generate the briefing")
+            log.warning("briefing_failed case=%s lang=%s cache_key=%s stage=%s error=%s http=%s", record["key"],
+                        lang, key[:12], stage, type(exc).__name__, getattr(exc, "code", None))
             with db:
                 db.execute("""INSERT INTO briefings (cache_key, error) VALUES (?, ?)
                     ON CONFLICT(cache_key) DO UPDATE SET error=excluded.error""", (key, error))

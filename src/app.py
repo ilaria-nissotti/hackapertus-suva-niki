@@ -26,7 +26,7 @@ import conversation
 import review_kb
 from bger import ROOT, model_config
 from summaries import VERSION, draft, make_facts
-from suva.config import load_settings
+from suva.config import configure_logging, load_settings
 from suva.sources.base import DOCKET_RE
 
 PAGE = 30
@@ -172,7 +172,8 @@ def process(key, kind, *, record=None, config=None):
                      config.get("error", "Missing model configuration") if model == "unconfigured" else
                      "Apertus request failed. Try again." if isinstance(exc, OSError) else
                      "Could not generate a draft with verified source evidence. Try again.")
-            print(f"{key} {kind}: {error}", file=sys.stderr, flush=True)
+            app.logger.warning("summary_failed case=%s kind=%s error=%s reason=%r", key, kind,
+                               type(exc).__name__, error)
         with db:
             db.execute("""INSERT INTO results (case_key, kind, version, payload, error)
                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(case_key,kind,version)
@@ -180,6 +181,8 @@ def process(key, kind, *, record=None, config=None):
                 WHERE results.payload IS NULL""",
                        (key, kind, generation_version(record, config),
                         json.dumps(payload, ensure_ascii=False) if payload else None, error))
+        if payload is not None:
+            app.logger.info("summary_ready case=%s kind=%s model=%s", key, kind, model)
         return payload is not None
 
 
@@ -187,7 +190,7 @@ def run_summary_job(key, kind):
     try:
         return process(key, kind)
     except Exception as exc:
-        app.logger.error("Summary job failed for %s (%s): %s", key, kind, type(exc).__name__)
+        app.logger.error("summary_job_crashed case=%s kind=%s error=%s", key, kind, type(exc).__name__)
         return False
 
 
@@ -350,12 +353,24 @@ def queue_briefing():
         cache_key, args = prepare_briefing(key, lang)
     except (OSError, ValueError) as exc:
         message = str(exc) if isinstance(exc, ValueError) else "Could not load briefing configuration."
+        app.logger.info("briefing_rejected case=%s lang=%s reason=%r", key, lang, message)
     else:
         task = ("briefing", cache_key)
 
         def run():
             try:
                 briefing.generate(*args)
+            except Exception as exc:  # a pool thread would swallow it: log it and show an error in the UI
+                app.logger.error("briefing_job_crashed case=%s lang=%s cache_key=%s error=%s", key, lang,
+                                 cache_key[:12], type(exc).__name__)
+                try:
+                    with closing(connect()) as db, db:
+                        db.execute("""INSERT INTO briefings (cache_key, error) VALUES (?, ?)
+                            ON CONFLICT(cache_key) DO UPDATE SET error=excluded.error""",
+                                   (cache_key, "Briefing failed unexpectedly. Try again."))
+                except sqlite3.Error as db_exc:
+                    app.logger.error("briefing_error_not_stored cache_key=%s error=%s", cache_key[:12],
+                                     type(db_exc).__name__)
             finally:
                 with pending_lock:
                     pending.discard(task)
@@ -441,11 +456,14 @@ def add_case():
                 key = keys[0]
         with closing(connect()) as db, db:
             db.execute("INSERT OR IGNORE INTO review_cases (case_key) VALUES (?)", (key,))
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError) as exc:
+        app.logger.info("add_case_rejected docket=%r error=%s", docket[:40], type(exc).__name__)
         return jump(message="Could not add that judgment. Upload a UTF-8 text file.")
     except ValueError as exc:
         message = str(exc) if str(exc) else "Could not add that judgment."
+        app.logger.info("add_case_rejected docket=%r reason=%r", docket[:40], message)
         return jump(message=message)
+    app.logger.info("case_added case=%s upload=%s", key, bool(upload and upload.filename))
     return jump(key, "Judgment added.")
 
 
@@ -463,9 +481,12 @@ def approve():
     with closing(connect()) as db, db:
         row = get_result(db, record, lang, current_config())
         if not row or not row["payload"] or request.form.get("version") != row["version"]:
+            app.logger.info("approve_conflict case=%s lang=%s reason=%s", key, lang,
+                            "no_draft" if not row or not row["payload"] else "version_changed")
             return action_result(key, "The draft changed. Reload it and review it before approving.", 409)
         db.execute("UPDATE results SET approved=? WHERE case_key=? AND kind=? AND version=?",
                    (summary, key, lang, row["version"]))
+    app.logger.info("summary_approved case=%s lang=%s chars=%d", key, lang, len(summary))
     if wants_json():
         return action_result(key, "Summary approved.")
     return redirect(url_for("dashboard", case=key, lang=lang, message="Summary approved."), code=303)
@@ -494,6 +515,7 @@ def summarize_top(limit, workers):
 
 
 def main():
+    configure_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--today", type=date.fromisoformat,
                         help="reference date of the challenge window (YYYY-MM-DD, default: today)")
