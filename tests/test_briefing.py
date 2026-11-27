@@ -43,7 +43,8 @@ class BriefingTests(TestCase):
     def approve(self, lang, value):
         selected = self.client.get("/api/dashboard", query_string={"case": self.case}).json["selected"]
         response = self.client.post("/approve", data={"case": self.case, "version": selected[lang]["version"],
-                                                      "lang": lang, "summary": value})
+                                                      "lang": lang, "summary": value,
+                                                      "previous_approved": selected[lang]["approved"] or ""})
         self.assertEqual(response.status_code, 303)
 
     def prepared(self, lang):

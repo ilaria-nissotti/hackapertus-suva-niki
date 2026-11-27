@@ -68,7 +68,8 @@ function Summary({record, lang, audio, action, busy, visible}: {
           const summary = (edit ?? saved).trim();
           setSaveError('');
           setSaveStatus('Saving…');
-          if (await action('/approve', fields({...base, summary, version: result.version ?? ""}), setSaveError)) {
+          if (await action('/approve', fields({...base, summary, version: result.version ?? "",
+                                               previous_approved: result.approved ?? ""}), setSaveError)) {
             setEdit(summary);
             setSubmitted(summary);
             setSaveStatus(result.approved ? 'Approved edit saved.' : 'Summary approved.');

@@ -256,7 +256,7 @@ def add_draft(key):
     return version
 
 
-def test_20_simultaneous_approvals_all_succeed_and_one_text_wins(client, case):
+def test_20_simultaneous_approvals_save_exactly_one_and_refuse_the_rest(client, case):
     version = add_draft(case)
     codes = []
 
@@ -267,7 +267,7 @@ def test_20_simultaneous_approvals_all_succeed_and_one_text_wins(client, case):
         codes.append(response.status_code)
 
     in_threads(20, approve)
-    assert codes == [200] * 20
+    assert sorted(codes) == [200] + [409] * 19  # every tab saw no approval; only the first save may land
     with closing(dashboard.connect()) as db:
         approved = db.execute("SELECT approved FROM results WHERE case_key=?", (case,)).fetchone()[0]
     assert approved in {f"Fassung {i}" for i in range(20)}

@@ -57,9 +57,9 @@ def page(client, **query):
 
 # --- /approve ----------------------------------------------------------------------------------
 
-def approve(client, key, version, summary="Genehmigt.", lang="de", headers=JSON):
-    return client.post("/approve", headers=headers,
-                       data={"case": key, "lang": lang, "summary": summary, "version": version})
+def approve(client, key, version, summary="Genehmigt.", lang="de", headers=JSON, previous=""):
+    return client.post("/approve", headers=headers, data={"case": key, "lang": lang, "summary": summary,
+                                                          "version": version, "previous_approved": previous})
 
 
 def test_approve_accepts_exactly_16000_characters(client, case):
@@ -107,11 +107,26 @@ def test_approve_missing_form_field_is_400(client, case):
     assert client.post("/approve", data={"case": case, "lang": "de"}, headers=JSON).status_code == 400
 
 
-def test_re_approval_overwrites_the_earlier_text(client, case):
+def test_re_approval_from_the_page_that_saw_the_approval_replaces_it(client, case):
     version = add_draft(case)
-    approve(client, case, version, "Erste Fassung.")
-    approve(client, case, version, "Zweite Fassung.")
+    assert approve(client, case, version, "Erste Fassung.").status_code == 200
+    assert approve(client, case, version, "Zweite Fassung.", previous="Erste Fassung.").status_code == 200
     assert result_row(case, "de")["approved"] == "Zweite Fassung."
+
+
+def test_second_tab_cannot_silently_overwrite_another_tabs_approval(client, case):
+    version = add_draft(case)
+    # Both tabs loaded the unapproved draft (previous_approved "").
+    assert approve(client, case, version, "Fassung aus Tab A.").status_code == 200
+    late = approve(client, case, version, "Fassung aus Tab B.")
+    assert late.status_code == 409 and late.json["message"].startswith("Another approval was saved for this draft.")
+    assert result_row(case, "de")["approved"] == "Fassung aus Tab A."
+
+
+def test_approval_with_an_outdated_previous_text_is_refused(client, case):
+    version = add_draft(case, approved="Aktuell.")
+    assert approve(client, case, version, "Neu.", previous="Älter.").status_code == 409
+    assert approve(client, case, version, "Neu.", previous="Aktuell.").status_code == 200
 
 
 # --- cross-site protection --------------------------------------------------------------------
@@ -386,7 +401,7 @@ def test_briefing_key_changes_when_the_approved_text_changes(client, case, monke
     monkeypatch.setattr(briefing, "voice_config", lambda lang: ("key", "voice"))
     version = add_draft(case, approved="Erste.")
     first = briefing_key(case)
-    approve(client, case, version, "Zweite.")
+    assert approve(client, case, version, "Zweite.", previous="Erste.").status_code == 200
     assert briefing_key(case) != first
 
 

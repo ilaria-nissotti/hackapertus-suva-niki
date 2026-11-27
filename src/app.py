@@ -486,8 +486,15 @@ def approve():
             app.logger.info("approve_conflict case=%s lang=%s reason=%s", key, lang,
                             "no_draft" if not row or not row["payload"] else "version_changed")
             return action_result(key, "The draft changed. Reload it and review it before approving.", 409)
-        db.execute("UPDATE results SET approved=? WHERE case_key=? AND kind=? AND version=?",
-                   (summary, key, lang, row["version"]))
+        # Only overwrite the approval this page saw: a second tab saving the same draft version must reload
+        # instead of silently replacing the first tab's edit. The condition makes the check atomic.
+        saved = db.execute("""UPDATE results SET approved=? WHERE case_key=? AND kind=? AND version=?
+                              AND COALESCE(approved, '') = ?""",
+                           (summary, key, lang, row["version"], request.form.get("previous_approved", "")))
+        if saved.rowcount != 1:
+            app.logger.info("approve_conflict case=%s lang=%s reason=approval_changed", key, lang)
+            return action_result(key, "Another approval was saved for this draft. Reload it and review it "
+                                      "before approving.", 409)
     app.logger.info("summary_approved case=%s lang=%s chars=%d", key, lang, len(summary))
     if wants_json():
         return action_result(key, "Summary approved.")
