@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 
 from suva.config import load_settings
 from suva.storage import open_repository
@@ -26,7 +27,7 @@ def cmd_llm_ping(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     repo = open_repository(settings)
-    llm = LLMClient(settings, repo=repo, cache=None)  # bypass cache: we want a live round-trip
+    llm = LLMClient(replace(settings, llm_cache_mode="off"), repo=repo)
     print(f"endpoint host: {settings.llm_host}  model: {settings.llm_name}")
     try:
         r = llm.chat(
@@ -34,7 +35,7 @@ def cmd_llm_ping(args: argparse.Namespace) -> int:
             prompt_version="ping/v1", temperature=0.0, max_tokens=args.max_tokens,
         )
     except Exception as exc:
-        print(f"FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"FAILED: {type(exc).__name__}", file=sys.stderr)
         return 1
     finally:
         repo.close()

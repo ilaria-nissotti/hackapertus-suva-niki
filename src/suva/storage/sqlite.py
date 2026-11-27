@@ -28,20 +28,28 @@ class SQLiteRepository(Repository):
         self.conn.execute("PRAGMA journal_mode = WAL")
 
     def migrate(self) -> list[str]:
-        self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
-        )
-        done = {r["name"] for r in self.conn.execute("SELECT name FROM schema_migrations")}
         applied = []
-        for name, sql in MIGRATIONS:
-            if name in done:
-                continue
-            with self.conn:
-                self.conn.executescript(sql)
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            self.conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
+            )
+            done = {r["name"] for r in self.conn.execute("SELECT name FROM schema_migrations")}
+            for name, sql in MIGRATIONS:
+                if name in done:
+                    continue
+                statement = ""
+                for line in sql.splitlines(keepends=True):
+                    statement += line
+                    if sqlite3.complete_statement(statement):
+                        self.conn.execute(statement)
+                        statement = ""
+                if statement.strip():
+                    raise ValueError(f"Incomplete SQL in migration {name}")
                 self.conn.execute(
                     "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)", (name, utcnow())
                 )
-            applied.append(name)
+                applied.append(name)
         return applied
 
     def append_audit(self, entry: AuditEntry) -> int:

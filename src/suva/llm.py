@@ -1,7 +1,7 @@
 """Apertus via any OpenAI-compatible endpoint, with call cache and audit log.
 
 - Endpoint/model come only from LLM_NAME / LLM_BASE_URL / LLM_API_KEY.
-- Cache key = sha256(model + prompt_version + full request input).
+- Cache key = sha256(endpoint + model + prompt_version + full request input).
 - LLM_CACHE_MODE=readonly serves the frozen snapshot: a cache miss raises CacheMiss
   instead of calling the network, so the demo cannot break on a gateway outage.
 - Every call (hit, miss, error) is appended to audit_log with model, host,
@@ -30,6 +30,7 @@ class CacheMiss(RuntimeError):
 class LLMResult:
     text: str
     model: str
+    host: str
     prompt_version: str
     input_hash: str
     output_hash: str
@@ -116,46 +117,53 @@ class LLMClient:
             request["max_tokens"] = max_tokens
         if response_format is not None:
             request["response_format"] = response_format
-        key = sha256({"prompt_version": prompt_version, **request})
+        input_hash = sha256({"prompt_version": prompt_version, **request})
+        key = sha256({"endpoint": self.settings.llm_base_url, "input_hash": input_hash})
         mode = self.settings.llm_cache_mode
 
         if self.cache is not None and mode in ("readwrite", "readonly"):
             hit = self.cache.get(key)
             if hit is not None:
                 result = LLMResult(
-                    text=hit["text"], model=model, prompt_version=prompt_version, input_hash=key,
+                    text=hit["text"], model=hit["served_model"], host=hit["host"],
+                    prompt_version=prompt_version, input_hash=input_hash,
                     output_hash=sha256(hit["text"]), cached=True, latency_ms=0, usage=hit.get("usage", {}),
                 )
                 self._audit(result)
                 return result
             if mode == "readonly":
-                self._audit_error(model, prompt_version, key, "cache_miss_readonly")
+                self._audit_error(model, prompt_version, input_hash, "cache_miss_readonly")
                 raise CacheMiss(f"{prompt_version}: not in LLM cache and LLM_CACHE_MODE=readonly")
 
         t0 = time.monotonic()
         try:
             resp = self.client.chat.completions.create(**request)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            if not resp.choices:
+                raise ValueError("Endpoint response has no choices")
+            text = resp.choices[0].message.content or ""
+            usage = {}
+            if getattr(resp, "usage", None) is not None:
+                usage = {
+                    "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(resp.usage, "completion_tokens", None),
+                }
+            served_model = getattr(resp, "model", None) or model
+            host = self.settings.llm_host
+
+            if self.cache is not None and mode == "readwrite":
+                self.cache.put(key, model, prompt_version, {
+                    "text": text, "usage": usage, "served_model": served_model, "host": host,
+                })
+
+            result = LLMResult(
+                text=text, model=served_model, host=host, prompt_version=prompt_version,
+                input_hash=input_hash, output_hash=sha256(text), cached=False,
+                latency_ms=latency_ms, usage=usage,
+            )
         except Exception as exc:
-            self._audit_error(model, prompt_version, key, f"{type(exc).__name__}: {exc}")
+            self._audit_error(model, prompt_version, input_hash, type(exc).__name__)
             raise
-        latency_ms = int((time.monotonic() - t0) * 1000)
-
-        text = resp.choices[0].message.content or ""
-        usage = {}
-        if getattr(resp, "usage", None) is not None:
-            usage = {
-                "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
-                "completion_tokens": getattr(resp.usage, "completion_tokens", None),
-            }
-        served_model = getattr(resp, "model", None) or model
-
-        if self.cache is not None and mode == "readwrite":
-            self.cache.put(key, model, prompt_version, {"text": text, "usage": usage, "served_model": served_model})
-
-        result = LLMResult(
-            text=text, model=served_model, prompt_version=prompt_version, input_hash=key,
-            output_hash=sha256(text), cached=False, latency_ms=latency_ms, usage=usage,
-        )
         self._audit(result)
         return result
 
@@ -165,7 +173,7 @@ class LLMClient:
         self.repo.append_audit(AuditEntry(
             kind="llm_call", actor=r.model,
             payload={
-                "host": self.settings.llm_host, "prompt_version": r.prompt_version,
+                "host": r.host, "prompt_version": r.prompt_version,
                 "input_hash": r.input_hash, "output_hash": r.output_hash, "cached": r.cached,
                 "latency_ms": r.latency_ms, "usage": r.usage,
             },

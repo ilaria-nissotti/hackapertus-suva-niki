@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,7 +72,7 @@ def test_errors_are_audited_and_raised(tmp_path, repo):
     llm = LLMClient(s, repo=repo, client=client)
     with pytest.raises(TimeoutError):
         llm.chat(MSG, prompt_version="t/v1")
-    assert "gateway down" in repo.list_audit(kind="llm_call")[0]["payload"]["error"]
+    assert repo.list_audit(kind="llm_call")[0]["payload"]["error"] == "TimeoutError"
 
 
 def test_cache_persists_across_instances(tmp_path):
@@ -79,3 +80,39 @@ def test_cache_persists_across_instances(tmp_path):
     c1.put("k", "m", "v1", {"text": "x"})
     c1.close()
     assert LLMCache(tmp_path / "c.sqlite").get("k") == {"text": "x"}
+
+def test_endpoint_cache_isolation_and_served_model(tmp_path, repo, monkeypatch):
+    first, completions = make(tmp_path, repo)
+    monkeypatch.setattr(completions, "create", lambda **kwargs: SimpleNamespace(
+        model="served-model", choices=[SimpleNamespace(message=SimpleNamespace(content="first"))],
+    ))
+    first.chat(MSG, prompt_version="t/v1")
+    replay = first.chat(MSG, prompt_version="t/v1")
+    assert (replay.cached, replay.model, replay.host) == (True, "served-model", "api.example.test")
+    assert repo.list_audit()[0]["actor"] == "served-model"
+
+    second, calls = make(tmp_path, repo, LLM_BASE_URL="https://other.example.test/v1")
+    assert not second.chat(MSG, prompt_version="t/v1").cached
+    assert len(calls.calls) == 1
+
+
+def test_malformed_response_is_audited(tmp_path, repo, monkeypatch):
+    llm, completions = make(tmp_path, repo)
+    monkeypatch.setattr(completions, "create", lambda **kwargs: SimpleNamespace(choices=[]))
+    with pytest.raises(ValueError, match="no choices"):
+        llm.chat(MSG, prompt_version="t/v1")
+    assert repo.list_audit()[0]["payload"]["error"] == "ValueError"
+
+
+def test_ping_bypasses_readonly_cache(tmp_path, monkeypatch):
+    from suva import cli, llm
+
+    cached, _ = make(tmp_path, None)
+    cached.chat(MSG, prompt_version="ping/v1", max_tokens=20)
+    cached.cache.close()
+    settings = make_settings(tmp_path, LLM_CACHE_MODE="readonly")
+    client, calls = fake_client()
+    monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    monkeypatch.setattr(llm, "_build_openai_client", lambda settings: client)
+    assert cli.main(["llm-ping", "--prompt", "Hallo"]) == 0
+    assert len(calls.calls) == 1

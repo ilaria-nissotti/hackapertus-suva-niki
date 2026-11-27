@@ -28,7 +28,7 @@ class Settings:
     @property
     def llm_host(self) -> str:
         """Host part of the endpoint, recorded per call (never the key)."""
-        return urlparse(self.llm_base_url).netloc or "unset"
+        return urlparse(self.llm_base_url).hostname or "unset"
 
     @property
     def sqlite_path(self) -> Path:
