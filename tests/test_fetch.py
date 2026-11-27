@@ -26,7 +26,7 @@ def es_client(hits_by_day, html_calls):
     def handler(req):
         if req.url.path.endswith(".html"):
             html_calls.append(str(req.url))
-            return httpx.Response(200, text="<div class='para'>x</div>")
+            return httpx.Response(200, text="<b>8C_9/2024</b><div class='para'>Erwägungen</div>")
         rng = json.loads(req.content)["query"]["bool"]["filter"][1]["range"]["date"]
         hits = [h for d, h in hits_by_day if rng["gte"] <= d <= rng["lte"]]
         return httpx.Response(200, json={"hits": {"total": {"value": len(hits)}, "hits": hits}})
@@ -68,3 +68,54 @@ def test_fetch_without_entscheidsuche(tmp_path, repo):
     parquet(raw, [("8C_1/2025", "2025-10-02")])
     rep = fetch(repo, raw, Window("dev", date(2025, 10, 1), date(2025, 10, 7)), use_entscheidsuche=False)
     assert rep.opencaselaw == 1 and rep.entscheidsuche == 0
+
+
+def test_challenge_uses_publication_dates_and_separates_unknown(tmp_path, repo):
+    raw = tmp_path / "raw"
+    parquet(raw, [("8C_1/2025", "2025-01-01"), ("8C_2/2025", "2025-07-20"), ("8C_3/2025", "2025-07-21")])
+    path = raw / "opencaselaw" / "bger.parquet"
+    table = pq.read_table(path)
+    table = table.set_column(table.schema.get_field_index("publication_date"), "publication_date",
+                             pa.array(["2025-10-01", "2025-07-25", None]))
+    pq.write_table(table, path)
+    window = Window("challenge", date(2025, 7, 1), date(2025, 10, 10), date(2025, 8, 1))
+    rep = fetch(repo, raw, window, use_entscheidsuche=False, include_picks=False)
+    assert not rep.errors
+    assert set(rep.sightings) == {"8C_1/2025@2025-01-01", "8C_3/2025@2025-07-21"}
+    assert rep.publication_unknown == 1
+
+
+def test_pick_uses_exact_date_and_queries_missing_pick(tmp_path, repo):
+    raw = tmp_path / "raw"
+    docket = "8C_1/2025"
+    parquet(raw, [(docket, "2025-02-02")])
+    ref = f"{docket}@2025-02-03"
+    repo.upsert_known_positive(dict(ref=ref, docket=docket, court="bger", in_xlsx=1, in_exports=0))
+    window = Window("dev", date(2025, 10, 1), date(2025, 10, 7))
+    absent = fetch(repo, raw, window, use_entscheidsuche=False)
+    assert absent.picks_missing == [ref]
+    client = es_client([es_hit(docket, "2025-02-03")], [])
+    listed = fetch(repo, raw, window, html_for_picks=False, client=client)
+    assert listed.picks_listed == 1 and listed.picks_found == 0
+    assert listed.picks_without_text == [ref]
+
+
+def test_block_during_listing_prevents_html_requests(tmp_path, repo):
+    raw = tmp_path / "raw"
+    docket = "8C_1/2025"
+    parquet(raw, [(docket, "2025-10-02")])
+    repo.upsert_known_positive(dict(ref=docket, docket=docket, court="bger", in_xlsx=1, in_exports=0))
+    window = Window("dev", date(2025, 10, 1), date(2025, 10, 14))
+    calls = []
+
+    def handler(request):
+        calls.append(request.method)
+        if len(calls) == 1:
+            _, hit = es_hit(docket, "2025-10-02")
+            return httpx.Response(200, json={"hits": {"total": {"value": 1}, "hits": [hit]}})
+        return httpx.Response(403)
+
+    client = PoliteClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    rep = fetch(repo, raw, window, client=client)
+    assert calls == ["POST", "POST"]
+    assert rep.source_runs["entscheidsuche"]["status"] == "blocked"

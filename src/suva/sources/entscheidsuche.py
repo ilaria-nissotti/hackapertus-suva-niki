@@ -9,9 +9,12 @@ dev window and all 82 Suva picks, but it lags OpenCaseLaw in the most recent wee
 from __future__ import annotations
 
 import re
+from tempfile import NamedTemporaryFile
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterator
+
+from bs4 import BeautifulSoup
 
 from suva.http import PoliteClient
 from suva.sources.base import SourceRecord, parse_iso_date
@@ -83,8 +86,32 @@ def fetch_html(client: PoliteClient, rec: SourceRecord, cache_dir: Path) -> str:
         raise ValueError(f"unsafe source id {rec.source_id!r}")
     path = cache_dir / f"{rec.source_id}.html"
     if path.exists():
-        return path.read_text(encoding="utf-8")
+        try:
+            html = path.read_text(encoding="utf-8")
+            _validate_html(html, rec)
+            return html
+        except (UnicodeError, ValueError):
+            pass
     html = client.get(rec.html_url).text
+    _validate_html(html, rec)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(html, encoding="utf-8")
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=cache_dir, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(html)
+            output.close()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
     return html
+
+
+def _validate_html(html: str, rec: SourceRecord) -> None:
+    soup = BeautifulSoup(html, "lxml")
+    content = " ".join(p.get_text(" ", strip=True) for p in soup.select("div.para"))
+    docket = re.sub(r"[^a-z0-9]", "", rec.docket.lower())
+    header = re.sub(r"[^a-z0-9]", "", soup.get_text(" ", strip=True).lower())
+    if not content.strip() or not docket or docket not in header or not re.search(
+        r"Erwägungen|Considérant|Considérants|Diritto|Considerando", content, re.IGNORECASE
+    ):
+        raise ValueError(f"{rec.docket}: response lacks expected judgement content")

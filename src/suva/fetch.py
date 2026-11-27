@@ -1,16 +1,10 @@
-"""Step 3: fill the KB with judgements for a window (+ Suva's picks), from both sources.
-
-1. OpenCaseLaw: full text for every decision in the window (local parquet).
-2. Suva's picks: always fetched, whatever their date (they are the labels).
-3. entscheidsuche: independent listing of the same window -> coverage ledger.
-   A decision only entscheidsuche has is stored without text: that is a gap.
-4. Optional: structured HTML from entscheidsuche for the picks (step 4 input).
-"""
+"""Collect source sightings, challenge cohorts, and usable text for Suva picks."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from datetime import timedelta
 
 from suva.http import Blocked, PoliteClient
 from suva.sources import entscheidsuche, opencaselaw
@@ -29,16 +23,19 @@ class FetchReport:
     picks_requested: int = 0
     picks_found: int = 0
     picks_missing: list[str] = field(default_factory=list)
+    picks_listed: int = 0
+    picks_ambiguous: list[str] = field(default_factory=list)
+    picks_without_text: list[str] = field(default_factory=list)
+    published_from: str | None = None
+    publication_unknown: int = 0
+    source_runs: dict = field(default_factory=dict)
+    sightings: dict = field(default_factory=dict)
     new_judgements: int = 0
     html_fetched: int = 0
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return asdict(self)
-
-
-def _pick_dockets(repo: Repository) -> set[str]:
-    return {r["docket"] for r in repo.list_known_positives(court="bger") if r["docket"]}
 
 
 def fetch(
@@ -53,62 +50,135 @@ def fetch(
     client: PoliteClient | None = None,
 ) -> FetchReport:
     rep = FetchReport(window.name, window.start.isoformat(), window.end.isoformat())
-    parquet = opencaselaw.download_bger(raw_dir / "opencaselaw" / "bger.parquet", refresh=refresh_opencaselaw)
+    if window.published_from:
+        rep.published_from = window.published_from.isoformat()
+    rep.source_runs = {
+        "opencaselaw": {"status": "pending", "ranges": []},
+        "entscheidsuche": {"status": "pending" if use_entscheidsuche else "disabled", "ranges": []},
+    }
+    records = {}
+    publication_dates = {}
+    pick_labels = repo.list_known_positives(court="bger") if include_picks else []
+    picks = {r["docket"] for r in pick_labels if r["docket"]}
+    rep.picks_requested = len(pick_labels)
 
-    def store(rec) -> None:
+    def store(rec: SourceRecord, *, cohort: bool = False) -> None:
         rep.new_judgements += repo.upsert_judgement(rec)
+        row = records.setdefault(rec.key, {})
+        row[rec.source] = rec
+        if rec.publication_date:
+            publication_dates[rec.key] = rec.publication_date.isoformat()
+        if cohort:
+            sighting = rep.sightings.setdefault(rec.key, {
+                "decision_date": rec.decision_date.isoformat() if rec.decision_date else None,
+                "publication_date": None, "sources": [], "has_text": False,
+            })
+            if rec.source not in sighting["sources"]:
+                sighting["sources"].append(rec.source)
+            if rec.publication_date:
+                sighting["publication_date"] = rec.publication_date.isoformat()
+            sighting["has_text"] |= bool(rec.text and rec.text.strip())
 
-    for rec in opencaselaw.read_bger(parquet, window.start, window.end):
-        store(rec)
-        rep.opencaselaw += 1
+    ocl = rep.source_runs["opencaselaw"]
+    try:
+        parquet = opencaselaw.download_bger(raw_dir / "opencaselaw" / "bger.parquet", refresh=refresh_opencaselaw)
+        if window.published_from:
+            for rec in opencaselaw.read_bger(parquet, window.start, window.end, with_text=False):
+                if rec.publication_date:
+                    publication_dates[rec.key] = rec.publication_date.isoformat()
+        for rec in opencaselaw.read_bger(parquet, window.start, window.end, published_from=window.published_from):
+            store(rec, cohort=True)
+            rep.opencaselaw += 1
+        ocl["ranges"].append([rep.start, rep.end])
+        if picks:
+            for rec in opencaselaw.read_bger(parquet, dockets=picks):
+                if rec.key not in records:
+                    store(rec)
+        ocl["status"] = "complete"
+    except Exception as exc:
+        ocl["status"] = "failed"
+        rep.errors.append(f"opencaselaw: {type(exc).__name__}: {exc}")
 
-    picks = _pick_dockets(repo) if include_picks else set()
-    rep.picks_requested = len(picks)
-    if picks:
-        for rec in opencaselaw.read_bger(parquet, dockets=picks):
-            store(rec)
-
-    client = client or PoliteClient()
-    if use_entscheidsuche:
-        try:
-            for rec in entscheidsuche.list_bger(client, window.start, window.end):
-                store(rec)
-                rep.entscheidsuche += 1
-            # picks outside the window: look them up on their own decision dates
-            pick_rows = [r for r in repo.list_judgements(dockets=picks)
-                         if not (rep.start <= (r["decision_date"] or "") <= rep.end)]
-            for d in sorted({r["decision_date"] for r in pick_rows if r["decision_date"]}):
-                day = parse_iso_date(d)
-                for rec in entscheidsuche.list_bger(client, day, day):
-                    if rec.docket in picks:
-                        store(rec)
-        except Blocked as exc:
-            rep.errors.append(f"entscheidsuche blocked us, stopped: {exc}")
-
-    found = {r["docket"] for r in repo.list_judgements(dockets=picks)}
-    rep.picks_found = len(found)
-    rep.picks_missing = sorted(picks - found)
-
-    if use_entscheidsuche and html_for_picks:
-        cache = raw_dir / "entscheidsuche"
-        for row in repo.list_judgements(dockets=picks):
-            if row["html_path"]:
-                continue
-            src = {s["source"]: s for s in repo.judgement_sources(row["key"])}.get("entscheidsuche")
-            if not src or not src["html_url"]:
-                continue
-            rec = SourceRecord(
-                source="entscheidsuche", source_id=src["source_id"], docket=row["docket"],
-                decision_date=parse_iso_date(row["decision_date"]), html_url=src["html_url"])
+    owns_client = use_entscheidsuche and client is None
+    if owns_client:
+        client = PoliteClient()
+    try:
+        es = rep.source_runs["entscheidsuche"]
+        if use_entscheidsuche:
             try:
-                entscheidsuche.fetch_html(client, rec, cache)
-                repo.set_html_path(row["key"], str(cache / f"{rec.source_id}.html"))
-                rep.html_fetched += 1
-            except Blocked as exc:
-                rep.errors.append(f"html blocked, stopped: {exc}")
-                break
-            except Exception as exc:  # one bad page must not stop the run
-                rep.errors.append(f"html {row['docket']}: {type(exc).__name__}: {exc}")
+                cur = window.start
+                while cur <= window.end:
+                    stop = min(cur + timedelta(days=6), window.end)
+                    for rec in entscheidsuche.list_bger(client, cur, stop):
+                        published = publication_dates.get(rec.key)
+                        in_window = not rep.published_from or not published or rep.published_from <= published <= rep.end
+                        if in_window or rec.docket in picks:
+                            store(rec, cohort=in_window)
+                        if in_window:
+                            rep.entscheidsuche += 1
+                    es["ranges"].append([cur.isoformat(), stop.isoformat()])
+                    cur = stop + timedelta(days=1)
+                dates = {
+                    parse_iso_date(p["ref"].partition("@")[2]) for p in pick_labels
+                }
+                dates.update(
+                    rec.decision_date for sources in records.values() for rec in sources.values()
+                    if rec.docket in picks
+                )
+                for day in sorted(d for d in dates if d and not window.start <= d <= window.end):
+                    for rec in entscheidsuche.list_bger(client, day, day):
+                        if rec.docket in picks:
+                            store(rec)
+                es["status"] = "complete"
+            except Exception as exc:
+                es["status"] = "blocked" if isinstance(exc, Blocked) else "failed"
+                rep.errors.append(f"entscheidsuche: {type(exc).__name__}: {exc}")
 
+        by_docket = {}
+        for key, sources in records.items():
+            rec = next(iter(sources.values()))
+            by_docket.setdefault(rec.docket, []).append(key)
+
+        for label in pick_labels:
+            ref = label["ref"]
+            if parse_iso_date(ref.partition("@")[2]):
+                matches = [ref] if ref in records else []
+            else:
+                matches = by_docket.get(label["docket"], [])
+            if not matches:
+                rep.picks_missing.append(ref)
+                continue
+            if len(matches) != 1:
+                rep.picks_ambiguous.append(ref)
+                continue
+            key = matches[0]
+            rep.picks_listed += 1
+            sources = records[key]
+            has_text = any(rec.text and rec.text.strip() for rec in sources.values())
+            html_record = sources.get("entscheidsuche")
+            if html_for_picks and es["status"] == "complete" and html_record and html_record.html_url:
+                cache = raw_dir / "entscheidsuche"
+                try:
+                    entscheidsuche.fetch_html(client, html_record, cache)
+                    repo.set_html_path(key, str(cache / f"{html_record.source_id}.html"))
+                    rep.html_fetched += 1
+                    has_text = True
+                except Blocked as exc:
+                    es["status"] = "blocked"
+                    rep.errors.append(f"html blocked, stopped: {exc}")
+                except Exception as exc:
+                    rep.errors.append(f"html {ref}: {type(exc).__name__}: {exc}")
+            if has_text:
+                rep.picks_found += 1
+                if key in rep.sightings:
+                    rep.sightings[key]["has_text"] = True
+            else:
+                rep.picks_without_text.append(ref)
+    finally:
+        if owns_client:
+            client.close()
+
+    if window.published_from:
+        rep.publication_unknown = sum(not row["publication_date"] for row in rep.sightings.values())
     repo.append_audit(AuditEntry(kind="fetch_run", actor="pipeline", payload=rep.as_dict()))
     return rep

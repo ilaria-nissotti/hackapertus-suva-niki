@@ -12,11 +12,13 @@ more recent than entscheidsuche's; publication_date is filled for ~37% of rows
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterator
 
 import httpx
+import pyarrow as pa
+import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
 from suva.http import USER_AGENT
@@ -66,6 +68,7 @@ def read_bger(
     end: date | None = None,
     dockets: set[str] | None = None,
     with_text: bool = True,
+    published_from: date | None = None,
 ) -> Iterator[SourceRecord]:
     """Decisions with start <= decision_date <= end and/or docket in `dockets`.
 
@@ -80,7 +83,14 @@ def read_bger(
     if dockets is not None:
         filters.append(("docket_number", "in", sorted(dockets)))
     cols = COLUMNS if with_text else [c for c in COLUMNS if c != "full_text"]
-    table = pq.read_table(path, columns=cols, filters=filters or None)
+    selection = pq.filters_to_expression(filters) if filters else ds.scalar(True)
+    if published_from is not None:
+        published = ds.field("publication_date").cast(pa.string())
+        in_window = published >= published_from.isoformat()
+        if end:
+            in_window = in_window & (published < (end + timedelta(days=1)).isoformat())
+        selection = in_window | (published.is_null() & selection)
+    table = pq.read_table(path, columns=cols, filters=selection)
 
     best: dict[str, SourceRecord] = {}
     for row in table.to_pylist():

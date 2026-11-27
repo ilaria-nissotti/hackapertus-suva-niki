@@ -5,8 +5,8 @@
 
 Sources give the decision date; publication date only sometimes. Measured on
 OpenCaseLaw 2026-11-27: publication follows decision by median 22 days,
-p90 43, p99 75. So the challenge window is selected by decision date and widened
-WIDEN_DAYS back; where a publication date is known it can narrow the set later.
+p90 43, p99 75. Use publication date for the confirmed challenge cohort. The widened decision
+date range is for discovery and for separately reporting unknown publication dates.
 """
 
 from __future__ import annotations

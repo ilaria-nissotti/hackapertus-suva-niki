@@ -64,8 +64,19 @@ def test_api_error_raises():
 
 def test_fetch_html_cached(tmp_path):
     calls = []
-    c = make_client(lambda r: calls.append(1) or httpx.Response(200, text="<div class='para'>x</div>"))
+    c = make_client(lambda r: calls.append(1) or httpx.Response(200, text="<b>8C_1/2025</b><div class='para'>Erwägungen</div>"))
     rec = next(iter(list_bger(make_client(lambda r: httpx.Response(200, json={
         "hits": {"total": {"value": 1}, "hits": [hit(1, "2025-10-01")]}})), date(2025, 10, 1), date(2025, 10, 1))))
     assert fetch_html(c, rec, tmp_path) == fetch_html(c, rec, tmp_path)
     assert len(calls) == 1
+
+
+def test_invalid_html_is_never_cached(tmp_path):
+    from suva.sources.base import SourceRecord
+
+    rec = SourceRecord("entscheidsuche", "sample", "8C_1/2025", date(2025, 10, 1),
+                       html_url="https://entscheidsuche.ch/sample.html")
+    client = make_client(lambda _: httpx.Response(200, text="<p>Service unavailable</p>"))
+    with pytest.raises(ValueError, match="expected judgement"):
+        fetch_html(client, rec, tmp_path)
+    assert not list(tmp_path.iterdir())

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -65,7 +67,17 @@ class PoliteClient:
                 raise Blocked(f"403 from {host} for {url}")
             if resp.status_code in RETRY_STATUS and attempt < self.retries:
                 retry_after = resp.headers.get("Retry-After", "")
-                self.sleep(float(retry_after) if retry_after.isdigit() else self.min_interval * 2 ** attempt)
+                delay = self.min_interval * 2 ** attempt
+                if retry_after.isdigit():
+                    delay = max(delay, float(retry_after))
+                elif retry_after:
+                    try:
+                        retry_at = parsedate_to_datetime(retry_after)
+                        if retry_at.tzinfo is not None:
+                            delay = max(delay, (retry_at - datetime.now(timezone.utc)).total_seconds())
+                    except (ValueError, OverflowError):
+                        pass
+                self.sleep(delay)
                 continue
             resp.raise_for_status()
             return resp

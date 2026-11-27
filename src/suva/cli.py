@@ -85,24 +85,34 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     finally:
         repo.close()
     print(json.dumps(rep.as_dict(), indent=2, ensure_ascii=False))
-    return 1 if rep.picks_missing or rep.errors else 0
+    return 1 if rep.picks_missing or rep.picks_ambiguous or rep.picks_without_text or rep.errors else 0
 
 
 def cmd_coverage(args: argparse.Namespace) -> int:
     """Per-week decision counts per source; flags weeks where one source has gaps."""
-    from suva.coverage import coverage_by_week
+    from suva.coverage import coverage_by_week, publication_coverage
 
     repo = open_repository(load_settings())
     try:
-        weeks = coverage_by_week(repo, args.start, args.end)
+        audits = repo.list_audit(kind="fetch_run", limit=1)
+        run = audits[0]["payload"] if audits else {}
+        weeks = coverage_by_week(repo, args.start, args.end, run=run)
     finally:
         repo.close()
     cols = ["total", "opencaselaw", "entscheidsuche", "only_opencaselaw", "only_entscheidsuche", "no_text"]
-    print("week        " + "".join(f"{c:>20}" for c in cols))
+    if "sightings" in run:
+        print("Latest fetch source status:", json.dumps(run["source_runs"]))
+    else:
+        print("Historical sightings (run-level coverage unavailable)")
+    print("week        " + "".join(f"{c:>20}" for c in cols) + "  Queries")
     for w in weeks:
-        print(f"{w['week']}  " + "".join(f"{w.get(c, 0):>20}" for c in cols))
+        queries = ", ".join(f"{source}: {status}" for source, status in w.get("queries", {}).items())
+        print(f"{w['week']}  " + "".join(f"{w.get(c, 0):>20}" for c in cols) + f"  {queries}")
     tot = {c: sum(w.get(c, 0) for w in weeks) for c in cols}
     print("TOTAL       " + "".join(f"{tot[c]:>20}" for c in cols))
+    if run.get("published_from"):
+        print(f"Publication coverage for {run['published_from']} through {run['end']}:",
+              json.dumps(publication_coverage(run)))
     return 0
 
 
