@@ -21,6 +21,27 @@ def cmd_init_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_supplied(args: argparse.Namespace) -> int:
+    """Parse judgements/ (exports + xlsx) into the KB. Safe to re-run."""
+    from pathlib import Path
+
+    from suva.config import REPO_ROOT
+    from suva.ingest.importer import import_supplied
+
+    settings = load_settings()
+    repo = open_repository(settings)
+    try:
+        rep = import_supplied(repo, Path(args.dir) if args.dir else REPO_ROOT / "judgements")
+    finally:
+        repo.close()
+    d = rep.as_dict()
+    notes = d.pop("notes")
+    print(json.dumps(d, indent=2))
+    for n in notes:
+        print("note:", n)
+    return 0
+
+
 def cmd_llm_ping(args: argparse.Namespace) -> int:
     """Check the gateway: one tiny uncached call, print model, latency, tokens."""
     from suva.llm import LLMClient
@@ -49,6 +70,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init-db", help="create/upgrade the knowledge base").set_defaults(func=cmd_init_db)
+
+    p = sub.add_parser("import-supplied", help="load Suva's example summaries + picked list into the KB")
+    p.add_argument("--dir", help="directory with Export_*.html and BG_Urteile_*.xlsx (default: judgements/)")
+    p.set_defaults(func=cmd_import_supplied)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")
     p.add_argument("--prompt", default="Antworte mit genau einem Wort: Bereit?")
