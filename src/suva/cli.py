@@ -108,6 +108,193 @@ def cmd_parse(args: argparse.Namespace) -> int:
     return 1 if rep.status.get("stale") else 0
 
 
+def _scoring_dir() -> Path:
+    return load_settings().data_dir / "scoring"
+
+
+def _dataset_path(args: argparse.Namespace) -> Path:
+    return Path(args.dataset) if getattr(args, "dataset", None) else _scoring_dir() / "dataset.jsonl"
+
+
+def cmd_dataset(args: argparse.Namespace) -> int:
+    from datetime import date
+
+    from suva.scoring.dataset import TEST_FROM, build_dataset
+    from suva.windows import DEV_END, DEV_START
+
+    out = _dataset_path(args)
+    with closing(open_repository(load_settings())) as repo:
+        rep = build_dataset(
+            repo, out,
+            start=date.fromisoformat(args.start) if args.start else DEV_START,
+            end=date.fromisoformat(args.end) if args.end else DEV_END,
+            test_from=date.fromisoformat(args.test_from) if args.test_from else TEST_FROM,
+        )
+    print(json.dumps(rep.as_dict(), indent=2, ensure_ascii=False))
+    print(f"wrote {out}")
+    if not rep.records:
+        print("note: no judgements in the period yet: run `fetch --window dev` and `parse` first", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _print_stats(title: str, stats) -> None:
+    print(f"\n{title}")
+    print(f"  {'field':<9} {'value':<45} {'rel':>5} {'not':>6} {'%rel':>6} {'%not':>6} {'lift':>7} {'prec':>5}")
+    for s in stats:
+        print(f"  {s.field:<9} {s.value[:45]:<45} {s.n_rel:>5} {s.n_non:>6} {s.share_rel:>6.0%} "
+              f"{s.share_non:>6.0%} {s.lift:>7.1f} {s.precision:>5.0%}")
+
+
+def cmd_analyze(args: argparse.Namespace) -> int:
+    from suva.scoring import analyze
+    from suva.scoring.dataset import load_dataset
+
+    records = load_dataset(_dataset_path(args), args.split)
+    n_rel = sum(r["relevant"] for r in records)
+    print(f"split: {args.split}  judgements: {len(records)}  relevant: {n_rel}  not relevant: {len(records) - n_rel}")
+    for field, table in analyze.overview(records).items():
+        print(f"\nby {field}:  (relevant / not relevant)")
+        for value, (rel, non) in list(table.items())[:12]:
+            print(f"  {value:<12} {rel:>5} / {non:<6}")
+    print("\nSuva as a party:", json.dumps(analyze.suva_check(records)))
+
+    stats, _, _ = analyze.feature_stats(records)
+    _print_stats(f"Positive rule candidates (in >= {args.min_rel} relevant, most over-represented):",
+                 analyze.positive_candidates(stats, args.min_rel, args.top))
+    _print_stats(f"Negative rule candidates (in >= {args.min_non} not relevant, most under-represented):",
+                 analyze.negative_candidates(stats, args.min_non, args.top))
+    out = _scoring_dir() / f"features_{args.split}.csv"
+    analyze.write_csv(stats, out)
+    print(f"\nall {len(stats)} features: {out}")
+    return 0
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    from suva.scoring.dataset import load_dataset
+    from suva.scoring.evaluate import evaluate, load_verdicts, write_scores
+    from suva.scoring.rules import load_rules
+
+    ruleset = load_rules(args.rules)
+    if args.threshold is not None:
+        ruleset.threshold = args.threshold
+    records = load_dataset(_dataset_path(args), args.split)
+    verdicts = None
+    if args.with_judge:
+        if not ruleset.judge_points:
+            print("note: --with-judge needs judge.points in the rules file; ignoring verdicts", file=sys.stderr)
+        verdicts = load_verdicts(_scoring_dir() / f"judge_{args.split}.jsonl")
+    ev = evaluate(records, ruleset, args.split, n_cases=args.cases, verdicts=verdicts)
+    m, rk = ev.at_threshold, ev.ranking
+    print(f"split: {args.split}  judgements: {ev.n}  relevant: {ev.n_rel}  rules: {len(ruleset.rules)}"
+          + (f"  judge verdicts used: {ev.judged}" if verdicts is not None else ""))
+    print("\nRanking (how lawyers use the sorted list):")
+    print("  relevant in top k:   " + "   ".join(f"top {k}: {p:.0%}" for k, p in rk.precision_at.items()))
+    print("  read down to find:   " + "   ".join(
+        f"{t:.0%} of relevant: {d if d is not None else '-'}" for t, d in rk.depth_for_recall.items()))
+    print(f"  average precision {rk.average_precision:.2f}   AUC {rk.auc:.3f}")
+    print(f"\nAt threshold {m.threshold:g}: flagged {m.flagged}, precision {m.precision:.0%}, recall {m.recall:.0%} "
+          f"(missed {m.false_neg} relevant, {m.false_pos} false alarms)")
+    print(f"\nBands (high >= {ruleset.bands['high']:g}, low < {ruleset.bands['low']:g}):  relevant / not relevant")
+    for band, (rel, non) in ev.bands.items():
+        print(f"  {band:<6} {rel:>5} / {non:<6}")
+    print("\nThreshold sweep:")
+    print(f"  {'thr':>4} {'flagged':>8} {'precision':>10} {'recall':>7}")
+    for s in ev.sweep:
+        print(f"  {s.threshold:>4g} {s.flagged:>8} {s.precision:>10.0%} {s.recall:>7.0%}")
+    print("\nCalibration (does a score of ~X mean ~X% relevant?):")
+    print(f"  {'score':>7} {'n':>6} {'relevant':>9} {'mean score':>11} {'actual %':>9}")
+    for c in ev.calibration:
+        print(f"  {c['bin']:>7} {c['n']:>6} {c['relevant']:>9} {c['mean_score']:>11} {c['actual_rate']:>9}")
+    print("\nRule evidence (paste into rules.yaml `evidence:`):")
+    for e in ev.evidence:
+        print(f"  {e.id:<32} {e.weight:>+6g}  {e.text}")
+    for title, cases in (("Missed relevant judgements", ev.misses), ("False alarms", ev.false_alarms)):
+        print(f"\n{title} ({len(cases)} shown):")
+        for c in cases:
+            print(f"  {c['score']:>5g}  {c['key']:<28} {c['chamber'] or '?':<3} {c['subject'][:90]}")
+            print(f"         fired: {', '.join(c['fired']) or '-'}")
+    if args.split == "test":
+        print("\nnote: test split. Use it for the final number, not for tuning rules.")
+    out = _scoring_dir() / f"scores_{args.split}.csv"
+    write_scores(records, ruleset, out, verdicts)
+    (_scoring_dir() / f"evaluation_{args.split}.json").write_text(
+        json.dumps(ev.as_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"\nscores: {out}")
+    return 0
+
+
+def cmd_fit_weights(args: argparse.Namespace) -> int:
+    from suva.scoring.dataset import load_dataset
+    from suva.scoring.fit import fit_weights, write_fitted
+    from suva.scoring.rules import load_rules
+
+    ruleset = load_rules(args.rules)
+    records = load_dataset(_dataset_path(args), "train")
+    fitted = fit_weights(records, ruleset, l2=args.l2)
+    print(f"fitted on {fitted.n} training judgements ({fitted.n_rel} relevant)")
+    print(f"  {'rule':<32} {'current':>8} {'suggested':>10}")
+    print(f"  {'(base)':<32} {ruleset.base:>8g} {fitted.base:>10}")
+    for rule_id, w in fitted.weights.items():
+        unit = " per match" if rule_id in fitted.graded else ""
+        print(f"  {rule_id:<32} {fitted.current[rule_id]:>8g} {w:>10}{unit}")
+    print(f"  suggested threshold (keeps 90% recall on train): {fitted.threshold:g}   current: {ruleset.threshold:g}")
+    out = ruleset.path.with_name("rules.fitted.yaml")
+    write_fitted(ruleset, fitted, out)
+    print(f"\nwrote {out} (review, then copy the weights you agree with into rules.yaml)")
+    return 0
+
+
+def cmd_judge(args: argparse.Namespace) -> int:
+    from suva.llm import LLMClient
+    from suva.scoring.dataset import load_dataset
+    from suva.scoring.judge import judge_record
+    from suva.scoring.rules import load_rules
+    from suva.scoring.score import score_record
+
+    settings = load_settings()
+    ruleset = load_rules(args.rules)
+    cutoff = args.candidate_threshold if args.candidate_threshold is not None \
+        else float(ruleset.judge.get("candidate_threshold", 20))
+    records = load_dataset(_dataset_path(args), args.split)
+    candidates = [(r, s) for r in records if (s := score_record(r, ruleset)).score >= cutoff]
+    candidates.sort(key=lambda rs: -rs[1].score)
+    if args.limit:
+        candidates = candidates[:args.limit]
+    print(f"split: {args.split}  candidates (rules score >= {cutoff:g}): {len(candidates)} of {len(records)}")
+
+    out = _scoring_dir() / f"judge_{args.split}.jsonl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    verdicts = []
+    with closing(open_repository(settings)) as repo, out.open("w", encoding="utf-8") as f:
+        llm = LLMClient(settings, repo=repo)
+        for i, (rec, s) in enumerate(candidates, 1):
+            try:
+                v = judge_record(llm, rec, ruleset, s.score)
+            except Exception as exc:  # keep going; the failure is recorded per judgement
+                print(f"  [{i}/{len(candidates)}] {rec['key']}: FAILED {type(exc).__name__}", file=sys.stderr)
+                continue
+            verdicts.append((rec, v))
+            f.write(json.dumps({**v.as_dict(), "relevant_label": rec["relevant"]}, ensure_ascii=False) + "\n")
+            print(f"  [{i}/{len(candidates)}] {rec['key']:<28} rules {s.score:>5.1f}  judge {v.relevance or v.error}"
+                  f"{'  (cached)' if v.cached else ''}")
+
+    usable = [(r, v) for r, v in verdicts if v.relevance]
+    n_rel = sum(r["relevant"] for r in records)
+    for name, flagged in (
+        ("rules only", [r for r, s in candidates if s.score >= ruleset.threshold]),
+        ("judge only (high/medium)", [r for r, v in usable if v.relevant]),
+        ("rules AND judge", [r for r, v in usable if v.relevant and v.rules_score >= ruleset.threshold]),
+        ("rules OR judge", [r for r, v in usable if v.relevant or v.rules_score >= ruleset.threshold]),
+    ):
+        tp = sum(r["relevant"] for r in flagged)
+        prec = tp / len(flagged) if flagged else 0.0
+        rec_ = tp / n_rel if n_rel else 0.0
+        print(f"  {name:<26} flagged {len(flagged):>4}  precision {prec:>4.0%}  recall {rec_:>4.0%}")
+    print(f"\nverdicts: {out}")
+    return 0
+
+
 def cmd_llm_ping(args: argparse.Namespace) -> int:
     from suva.llm import LLMClient
 
@@ -164,6 +351,46 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("parse", help="split judgements into passages (E. numbers) and extract citations")
     p.add_argument("--force", action="store_true", help="re-parse everything, not only new/changed texts")
     p.set_defaults(func=cmd_parse)
+
+    p = sub.add_parser("dataset", help="build the labelled dataset (Excel = relevant) with a time-based split")
+    p.add_argument("--start", help="first decision date (default: 2025-10-01)")
+    p.add_argument("--end", help="last decision date (default: 2026-03-31)")
+    p.add_argument("--test-from", help="decisions on/after this date are the test set (default: 2026-03-01)")
+    p.add_argument("--dataset", help="output path (default: data/scoring/dataset.jsonl)")
+    p.set_defaults(func=cmd_dataset)
+
+    split_choices = ["train", "test", "all"]
+    p = sub.add_parser("analyze", help="find candidate rules: features that separate relevant from not relevant")
+    p.add_argument("--split", choices=split_choices, default="train")
+    p.add_argument("--min-rel", type=int, default=3, help="minimum relevant judgements for a positive candidate")
+    p.add_argument("--min-non", type=int, default=20, help="minimum not-relevant judgements for a negative one")
+    p.add_argument("--top", type=int, default=30)
+    p.add_argument("--dataset")
+    p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser("evaluate", help="score a split with rules.yaml: precision, recall, misses, false alarms")
+    p.add_argument("--split", choices=split_choices, default="train")
+    p.add_argument("--rules", help="rules file (default: rules/rules.yaml)")
+    p.add_argument("--threshold", type=float, help="override the threshold in the rules file")
+    p.add_argument("--cases", type=int, default=15, help="misses / false alarms to list")
+    p.add_argument("--with-judge", action="store_true",
+                   help="add judge.points from the verdicts of `judge` (data/scoring/judge_<split>.jsonl)")
+    p.add_argument("--dataset")
+    p.set_defaults(func=cmd_evaluate)
+
+    p = sub.add_parser("fit-weights", help="suggest rule weights from the training data (rules.fitted.yaml)")
+    p.add_argument("--rules")
+    p.add_argument("--l2", type=float, default=1.0, help="regularisation strength (higher = smaller weights)")
+    p.add_argument("--dataset")
+    p.set_defaults(func=cmd_fit_weights)
+
+    p = sub.add_parser("judge", help="LLM judge: Apertus rates candidate judgements with the rubric in rules.yaml")
+    p.add_argument("--split", choices=split_choices, default="train")
+    p.add_argument("--rules")
+    p.add_argument("--candidate-threshold", type=float, help="override judge.candidate_threshold")
+    p.add_argument("--limit", type=int, help="judge at most N candidates (highest rules score first)")
+    p.add_argument("--dataset")
+    p.set_defaults(func=cmd_judge)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")
     p.add_argument("--prompt", default="Antworte mit genau einem Wort: Bereit?")
