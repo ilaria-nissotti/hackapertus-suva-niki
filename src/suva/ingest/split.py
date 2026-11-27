@@ -17,6 +17,9 @@ def _stratified_split(examples: list[dict], n_eval: int) -> dict[str, str]:
     for e in examples:
         strata[(e.get("language"), e.get("author"))].append(e["docket"])
     total = sum(len(v) for v in strata.values())
+    if total < 2:
+        raise ValueError(f"Need at least 2 example dockets to split, found {total}: "
+                         "run `python -m suva import-supplied` first")
     if not 0 < n_eval < total:
         raise ValueError(f"n_eval must be between 1 and {total - 1}")
 

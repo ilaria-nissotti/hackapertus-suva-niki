@@ -211,10 +211,15 @@ def test_import_supplied_with_missing_directory_raises(settings, tmp_path):
         cli.main(["import-supplied", "--dir", str(tmp_path / "nowhere")])
 
 
-def test_split_examples_on_empty_kb_gives_a_confusing_error(settings, tmp_path):
+def test_split_examples_on_empty_kb_says_to_import_first(settings, tmp_path):
     manifest = tmp_path / "split.json"
-    # BUG: with no imported examples the error reads "between 1 and -1". Expected: a message that
-    # says no examples are imported yet (run `import-supplied` first).
-    with pytest.raises(ValueError, match=r"n_eval must be between 1 and -1"):
+    with pytest.raises(ValueError, match=r"found 0: run `python -m suva import-supplied` first"):
         cli.main(["split-examples", "--manifest", str(manifest)])
     assert not manifest.exists()  # nothing written on failure
+
+
+def test_split_with_a_single_docket_says_to_import_first():
+    from suva.ingest.split import compute_split
+
+    with pytest.raises(ValueError, match="found 1"):
+        compute_split([{"docket": "8C_1/2025", "decision_id": "8C_1/2025@2025-10-01", "language": "de"}], 1)
