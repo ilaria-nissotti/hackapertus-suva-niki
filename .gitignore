@@ -33,3 +33,5 @@ data/*.sqlite-*
 *.egg-info/
 # Downloaded source data (OpenCaseLaw parquet, entscheidsuche HTML)
 data/raw/
+# Scoring outputs (dataset, feature stats, scores, judge verdicts) — regenerated from the KB
+data/scoring/
