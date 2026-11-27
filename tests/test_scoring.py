@@ -247,6 +247,16 @@ def test_bge_headnote_becomes_the_regeste_field(repo, tmp_path):
     assert "Headnote" not in excerpt(rec())  # ordinary judgements: no empty headnote line
 
 
+def test_dataset_reports_parses_from_an_older_parser(repo, tmp_path):
+    add(repo, "8C_7/2025", date(2025, 11, 3), JUDGEMENT)
+    parse_all(repo)
+    out = tmp_path / "dataset.jsonl"
+    assert build_dataset(repo, out).stale_parses == 0
+    repo.conn.execute("UPDATE parses SET parser_version = 'segment-v0'")
+    rep = build_dataset(repo, out)
+    assert rep.stale_parses == 1 and load_dataset(out)[0]["parse_stale"]
+
+
 def test_parse_verdict_accepts_json_inside_text_and_rejects_bad_answers():
     assert parse_verdict('Sure: {"relevance": "High", "reason": "UVG causal link."}') == (
         "high", "UVG causal link.", None)

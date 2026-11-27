@@ -19,6 +19,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Iterator
 
+from suva.hashing import sha256
+from suva.parse.segment import PARSER_VERSION
 from suva.sources.base import parse_iso_date
 from suva.storage.base import Repository
 from suva.windows import DEV_END, DEV_START
@@ -37,6 +39,7 @@ class DatasetReport:
     relevant: int = 0
     by_split: dict = field(default_factory=dict)
     without_text: int = 0
+    stale_parses: int = 0  # parsed with an older parser or an older text: run `parse`
     parse_status: dict = field(default_factory=dict)
     picks_not_in_dataset: list[str] = field(default_factory=list)  # Excel refs with no judgement in the period
     picks_ambiguous: list[str] = field(default_factory=list)  # docket-only refs with several decisions
@@ -97,6 +100,8 @@ def build_record(repo: Repository, row: dict[str, Any], positives: set[str], tes
         "relevant": row["key"] in positives,
         "split": "test" if decision and date.fromisoformat(decision) >= test_from else "train",
         "parse_status": parse.get("status"),
+        "parse_stale": bool(parse) and (parse.get("parser_version") != PARSER_VERSION
+                                        or parse.get("text_hash") != (sha256(j["text"]) if j.get("text") else None)),
         "parties": parse.get("parties") or "",
         "subject": parse.get("subject") or "",
         "header": joined(("header",)),
@@ -129,6 +134,7 @@ def build_dataset(
             splits[f"{rec['split']}_{'relevant' if rec['relevant'] else 'not_relevant'}"] += 1
             status[rec["parse_status"] or "not_parsed"] += 1
             rep.without_text += not rec["text"]
+            rep.stale_parses += rec["parse_stale"]
     rep.by_split, rep.parse_status = dict(sorted(splits.items())), dict(status)
     rep.picks_not_in_dataset, rep.picks_ambiguous = labels.missing, labels.ambiguous
     return rep

@@ -135,6 +135,9 @@ def cmd_dataset(args: argparse.Namespace) -> int:
     if not rep.records:
         print("note: no judgements in the period yet: run `fetch --window dev` and `parse` first", file=sys.stderr)
         return 1
+    if rep.stale_parses or rep.parse_status.get("not_parsed"):
+        print(f"note: {rep.stale_parses} stale and {rep.parse_status.get('not_parsed', 0)} unparsed judgements: "
+              "run `python -m suva parse`, then `dataset` again", file=sys.stderr)
     return 0
 
 
