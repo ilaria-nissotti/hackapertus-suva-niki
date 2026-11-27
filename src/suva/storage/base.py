@@ -29,5 +29,23 @@ class Repository(ABC):
     def list_audit(self, kind: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """Most recent audit records first."""
 
+    # --- supplied data (step 2) -------------------------------------------
+    @abstractmethod
+    def upsert_example(self, row: dict[str, Any]) -> None:
+        """Insert/update an example summary by docket. Never changes an assigned split."""
+
+    @abstractmethod
+    def list_examples(self, split: str | None = None) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def set_example_split(self, docket: str, split: str) -> None:
+        """Assign fewshot/eval. Raises if the docket already has a different split."""
+
+    @abstractmethod
+    def upsert_known_positive(self, row: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    def list_known_positives(self, court: str | None = None) -> list[dict[str, Any]]: ...
+
     @abstractmethod
     def close(self) -> None: ...

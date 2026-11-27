@@ -22,4 +22,38 @@ MIGRATIONS: list[tuple[str, str]] = [
         BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
         """,
     ),
+    (
+        "002_examples_and_known_positives",
+        """
+        -- Suva's human summaries (judgements/Export_*.html). split is frozen once set.
+        CREATE TABLE example_summaries (
+            docket        TEXT PRIMARY KEY,
+            decision_date TEXT,
+            title         TEXT NOT NULL,
+            language      TEXT,
+            text_de       TEXT NOT NULL,
+            text_fr       TEXT NOT NULL,
+            author        TEXT,
+            source_url    TEXT,
+            bger_url      TEXT,
+            aza_docid     TEXT,
+            source_file   TEXT NOT NULL,
+            notes         TEXT NOT NULL DEFAULT '[]',
+            split         TEXT CHECK (split IN ('fewshot', 'eval')),
+            imported_at   TEXT NOT NULL
+        );
+        -- Every judgement Suva chose to summarise (xlsx ∪ exports): the label set.
+        CREATE TABLE known_positives (
+            ref                TEXT PRIMARY KEY,   -- docket, or raw title for non-BGer rows
+            docket             TEXT,
+            court              TEXT NOT NULL CHECK (court IN ('bger', 'cantonal', 'unresolved')),
+            in_xlsx            INTEGER NOT NULL,
+            in_exports         INTEGER NOT NULL,
+            quarter            TEXT,
+            summary_created_at TEXT,
+            notes              TEXT NOT NULL DEFAULT '[]',
+            imported_at        TEXT NOT NULL
+        );
+        """,
+    ),
 ]

@@ -70,6 +70,62 @@ class SQLiteRepository(Repository):
         rows = self.conn.execute(sql, (*args, limit)).fetchall()
         return [{**dict(r), "payload": json.loads(r["payload"])} for r in rows]
 
+    # --- supplied data (step 2) -------------------------------------------
+    _EXAMPLE_COLS = (
+        "docket", "decision_date", "title", "language", "text_de", "text_fr", "author",
+        "source_url", "bger_url", "aza_docid", "source_file", "notes",
+    )
+    _POSITIVE_COLS = (
+        "ref", "docket", "court", "in_xlsx", "in_exports", "quarter", "summary_created_at", "notes",
+    )
+
+    def _upsert(self, table: str, key: str, cols: tuple[str, ...], row: dict[str, Any]) -> None:
+        unknown = set(row) - set(cols)
+        if unknown:
+            raise ValueError(f"{table}: unknown columns {sorted(unknown)}")
+        values = {c: row.get(c) for c in cols}
+        values["notes"] = json.dumps(values.get("notes") or [], ensure_ascii=False)
+        values["imported_at"] = utcnow()
+        names = list(values)
+        updates = ", ".join(f"{c} = excluded.{c}" for c in names if c != key)
+        with self.conn:
+            self.conn.execute(
+                f"INSERT INTO {table} ({', '.join(names)}) VALUES ({', '.join('?' for _ in names)}) "
+                f"ON CONFLICT({key}) DO UPDATE SET {updates}",
+                [values[c] for c in names],
+            )
+
+    @staticmethod
+    def _rows(cur) -> list[dict[str, Any]]:
+        return [{**dict(r), "notes": json.loads(r["notes"])} for r in cur.fetchall()]
+
+    def upsert_example(self, row: dict[str, Any]) -> None:
+        self._upsert("example_summaries", "docket", self._EXAMPLE_COLS, row)
+
+    def list_examples(self, split: str | None = None) -> list[dict[str, Any]]:
+        if split:
+            return self._rows(self.conn.execute(
+                "SELECT * FROM example_summaries WHERE split = ? ORDER BY docket", (split,)))
+        return self._rows(self.conn.execute("SELECT * FROM example_summaries ORDER BY docket"))
+
+    def set_example_split(self, docket: str, split: str) -> None:
+        row = self.conn.execute("SELECT split FROM example_summaries WHERE docket = ?", (docket,)).fetchone()
+        if row is None:
+            raise KeyError(docket)
+        if row["split"] not in (None, split):
+            raise ValueError(f"{docket} is frozen in split {row['split']!r}; refusing to move it to {split!r}")
+        with self.conn:
+            self.conn.execute("UPDATE example_summaries SET split = ? WHERE docket = ?", (split, docket))
+
+    def upsert_known_positive(self, row: dict[str, Any]) -> None:
+        self._upsert("known_positives", "ref", self._POSITIVE_COLS, row)
+
+    def list_known_positives(self, court: str | None = None) -> list[dict[str, Any]]:
+        if court:
+            return self._rows(self.conn.execute(
+                "SELECT * FROM known_positives WHERE court = ? ORDER BY ref", (court,)))
+        return self._rows(self.conn.execute("SELECT * FROM known_positives ORDER BY ref"))
+
     def close(self) -> None:
         self.conn.close()
 
