@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from suva.config import load_settings
+from suva.storage import SQLiteRepository
 
 
 def make_settings(tmp_path, **overrides):
@@ -14,3 +17,11 @@ def make_settings(tmp_path, **overrides):
     }
     env.update(overrides)
     return load_settings(environ=env)
+
+
+@pytest.fixture
+def repo(tmp_path):
+    r = SQLiteRepository(tmp_path / "kb.sqlite")
+    r.migrate()
+    yield r
+    r.close()
