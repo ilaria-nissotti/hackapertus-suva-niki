@@ -1,18 +1,26 @@
-"""Split DE, FR, and IT decisions into verbatim passages with source offsets."""
+"""Split DE, FR, and IT decisions into verbatim passages with source offsets.
+
+Also handles the print layout of published leading decisions (BGE): they open
+with "Urteilskopf" and a Regeste (the court's headnote), use German labels
+"Sachverhalt ab Seite N" / "Erwägungen" in every language, publish only an
+extract of the reasoning (so the first consideration may be E. 5) and usually
+carry no Dispositiv.
+"""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 
+from suva.sources.base import MONTHS
 from suva.sources.quality import is_error_page
 
-PARSER_VERSION = "segment-v3"
+PARSER_VERSION = "segment-v6"
 MIN_TEXT_CHARS = 1000
 
-FACTS_RE = re.compile(r"^(Sachverhalt|Faits|Fatti)\s*:?$", re.I)
+FACTS_RE = re.compile(r"^(Sachverhalt|Faits|Fatti)(\s+ab Seite \d+)?\s*:?$", re.I)
 REASONS_RE = re.compile(
-    r"^(Erwägung(?:en?)?|Considérant en droit|Considérants?|Considérant en fait et en droit|"
+    r"^(Erwägung(?:en?)?(?:\s+ab Seite \d+)?|Considérant en droit|Considérants?|Considérant en fait et en droit|"
     r"Considerando in diritto|Considerando in fatto e in diritto|Diritto|in Erwägung,?|"
     r"Ritenuto in fatto e considerando in diritto|Ritenuto in fatto e in diritto|ritiene|"
     r"considérant,?|considerando,?|"
@@ -32,6 +40,11 @@ DISPOSITIV_RE = re.compile(
 # a consideration number alone ("4.1.") or opening a paragraph ("4.1. Text …")
 NUM_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.?(?:\s+.*)?$", re.S)
 
+REGESTE_RE = re.compile(r"^Regeste(\s+[a-z])?$")
+BGE_EXTRACT_RE = re.compile(r"^(Urteilskopf|\d+\.\s+(Auszug aus dem Urteil|Extrait de l'arrêt|Estratto della sentenza)\b)")
+BGE_REASON_EXCERPT_RE = re.compile(r"^(Aus den Erwägungen|Extrait des considérants|Dai considerandi)\s*:?$", re.I)
+DATE_START_RE = re.compile(r"^\d{1,2}\.?\s+(\w+)")
+
 PARTIES_RE = re.compile(r"^(Verfahrensbeteiligte|Participants à la procédure|Partecipanti al procedimento|Parties)$", re.I)
 SUBJECT_RE = re.compile(r"^(Gegenstand|Objet|Oggetto)$", re.I)
 CHAMBER_RE = re.compile(r"(Abteilung|Cour de droit|Corte di diritto|Strafkammer|Cour pénale|Corte penale)", re.I)
@@ -40,7 +53,7 @@ CHAMBER_RE = re.compile(r"(Abteilung|Cour de droit|Corte di diritto|Strafkammer|
 @dataclass
 class Passage:
     pid: str  # "<key>#E.3.2"
-    kind: str  # header | facts | reasons | consideration | dispositiv | full
+    kind: str  # header | regeste | facts | reasons | consideration | dispositiv | full
     number: str | None  # "3.2" for considerations
     text: str
     start: int  # char offsets into the original text
@@ -76,8 +89,10 @@ def paragraphs(text: str) -> list[_Para]:
     return out
 
 
-def _plausible_next(prev: tuple[int, ...] | None, cand: tuple[int, ...]) -> bool:
-    """cand may follow prev: first child, next sibling, or next at a higher level."""
+def _plausible_next(prev: tuple[int, ...] | None, cand: tuple[int, ...], extract: bool = False) -> bool:
+    """Full decisions are consecutive; published extracts can omit sections."""
+    if extract:
+        return all(cand) and (prev is None or cand > prev)
     if prev is None:
         return cand in ((1,), (1, 1))
     if cand == prev + (1,):
@@ -109,15 +124,16 @@ def _header_fields(seg: Segmentation, header: list[_Para]) -> None:
 ORDER_CLAUSE = ("dass ", "que ", "qu'", "qu’", "che ", "vu ", "visto ", "in erwägung", "considérant", "considerando")
 
 
-def _reason_spans(paras: list[_Para], start: int, end: int):
+def _reason_spans(paras: list[_Para], start: int, end: int, extract: bool = False):
     """Yield the reasoning introduction and each numbered consideration."""
     number = None
     first = start
     for i in range(start + 1, end):
         match = NUM_RE.match(paras[i].text)
-        if match:
+        date_start = DATE_START_RE.match(paras[i].text) if extract else None
+        if match and not (date_start and date_start[1].casefold() in MONTHS):
             candidate = tuple(map(int, match[1].split(".")))
-            if _plausible_next(number, candidate):
+            if _plausible_next(number, candidate, extract):
                 yield first, i, number
                 first, number = i, candidate
     yield first, end, number
@@ -134,7 +150,12 @@ def segment(key: str, text: str | None) -> Segmentation:
     if short_text:
         seg.issues.append("too_short")
     paras = paragraphs(text)
+    extract = any(BGE_EXTRACT_RE.match(p.text) for p in paras[:4])
+    if extract:
+        seg.issues.append("bge_extract")
     reasons = _find(paras, REASONS_RE)
+    if extract and reasons is None:
+        reasons = _find(paras, BGE_REASON_EXCERPT_RE)
     outcome = _find(paras, DISPOSITIV_RE, 0 if reasons is None else reasons + 1, max_len=200)
     body_end = len(paras) if outcome is None else outcome
 
@@ -148,15 +169,19 @@ def segment(key: str, text: str | None) -> Segmentation:
     else:
         facts = _find(paras[:reasons], FACTS_RE)
         header_end = reasons if facts is None else facts
+        regeste = _find(paras[:header_end], REGESTE_RE) if extract else None
+        if regeste is not None:
+            spans.append(("regeste", regeste, header_end, None))
+            header_end = regeste
         if facts is None:
             seg.issues.append("no_facts_heading")
         else:
             spans.append(("facts", facts, reasons, None))
 
-    if outcome is None:
+    if outcome is None and not extract:  # published extracts normally omit the Dispositiv
         seg.issues.append("no_dispositiv")
     if reasons is not None:
-        reason_spans = list(_reason_spans(paras, reasons, body_end))
+        reason_spans = list(_reason_spans(paras, reasons, body_end, extract))
         for first, last, number in reason_spans:
             label = ".".join(map(str, number)) if number is not None else None
             spans.append(("consideration" if label else "reasons", first, last, label))
@@ -164,7 +189,7 @@ def segment(key: str, text: str | None) -> Segmentation:
         if unnumbered:
             seg.issues.append("no_numbered_considerations")
         short_order = any(p.text.lower().startswith(ORDER_CLAUSE) for p in paras[reasons + 1:min(reasons + 6, body_end)])
-        if short_text or outcome is None or (unnumbered and not short_order):
+        if short_text or (outcome is None and not extract) or (unnumbered and not short_order):
             seg.status = "partial"
 
     _header_fields(seg, paras[:header_end])
