@@ -4,12 +4,16 @@ Relevance is not decided here: the deterministic rules score (`python -m suva sc
 is what the review app shows.
 """
 
+from collections import Counter
+from contextlib import closing
+from functools import lru_cache
 import json
 import re
-from collections import Counter
-from functools import lru_cache
+import sys
 
-from bger import CASE_ID, ROOT, JudgmentExport, chat
+from bger import chat
+from suva.config import load_settings
+from suva.storage import open_repository
 
 VERSION = "suva-3"
 
@@ -54,22 +58,17 @@ def resolve_passages(source_passages, ids):
 
 @lru_cache(maxsize=1)
 def examples():
-    result = []
-    for path in sorted((ROOT / "judgements").glob("Export_*.html")):
-        html = path.read_text(encoding="utf-8-sig")
-        ids = CASE_ID.findall(html.split("</title>", 1)[0])
-        if not ids:
-            match = re.match(r"Export_(\d[A-Z]+_\d+)_(\d{4})", path.name)
-            ids = ["/".join(match.groups())] if match else []
-        entry = {"ids": ids}
-        for lang in ("de", "fr"):
-            match = re.search(rf"<h2>Text {lang}</h2>(.*?)(?=<h2>|</body>)", html, re.I | re.S)
-            if match:
-                parser = JudgmentExport()
-                parser.feed("<body>" + match[1] + "</body>")
-                entry[lang] = "".join(parser.body).strip()
-        result.append(entry)
-    return result
+    """Suva's own summaries from the few-shot split of the frozen example manifest.
+
+    The evaluation split stays unseen so drafts can be compared with it honestly.
+    Run `python -m suva import-supplied` and `split-examples` to create the split.
+    """
+    with closing(open_repository(load_settings())) as repo:
+        rows = repo.list_examples(split="fewshot")
+    if not rows:
+        print("note: no few-shot examples in the KB; drafts get no style examples. "
+              "Run `python -m suva import-supplied` and `split-examples`.", file=sys.stderr)
+    return [{"ids": [r["docket"]], "de": r["text_de"], "fr": r["text_fr"]} for r in rows]
 
 
 def similar_examples(source, lang, docket, allowed=None, reviewed=()):

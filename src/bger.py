@@ -1,10 +1,9 @@
-"""Shared helpers for the review app: case IDs, the export HTML reader, config and Apertus chat.
+"""Shared helpers for the review app: case IDs, config and Apertus chat.
 
 Judgements come from the suva knowledge base (`python -m suva fetch`); `python -m suva
 llm-ping` checks the Apertus endpoint.
 """
 
-from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path
@@ -14,40 +13,6 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE_ID = re.compile(r"\b\d+[A-Z]+_\d+/\d{4}\b")
-
-
-class JudgmentExport(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.in_body = False
-        self.in_title = False
-        self.language = None
-        self.title = []
-        self.body = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "html":
-            self.language = dict(attrs).get("lang")
-        elif tag == "title":
-            self.in_title = True
-        elif tag == "body":
-            self.in_body = True
-        elif self.in_body and tag in {"br", "hr"}:
-            self.body.append("\n")
-
-    def handle_endtag(self, tag):
-        if tag == "title":
-            self.in_title = False
-        elif tag == "body":
-            self.in_body = False
-        elif self.in_body and tag in {"p", "div", "h1", "h2", "h3", "li", "tr"}:
-            self.body.append("\n")
-
-    def handle_data(self, data):
-        if self.in_title:
-            self.title.append(data)
-        if self.in_body:
-            self.body.append(data)
 
 
 def local_config(*names):
