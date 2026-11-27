@@ -89,7 +89,10 @@ def load_record(key):
 
 
 def valid_date(value):
-    return date.fromisoformat(value) if value else None
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        raise ValueError("Enter dates as YYYY-MM-DD.") from None
 
 
 def safe_url(value):

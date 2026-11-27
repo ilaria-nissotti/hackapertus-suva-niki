@@ -165,11 +165,18 @@ def test_add_accepts_well_formed_case_ids(client, tmp_path, docket):
     assert response.status_code == 200 and response.json["case"] == f"{docket}@2026-10-01"
 
 
-def test_add_with_an_invalid_date_leaks_the_python_error(client, case):
-    response = add(client, docket="8C_1/2026", decision_date="2026-13-01")
-    assert response.status_code == 400
-    # The raw datetime error is shown instead of a reviewer-friendly message.
-    assert "month must be in 1..12" in response.json["message"]
+@pytest.mark.parametrize("field, value", [("decision_date", "2026-13-01"), ("decision_date", "01.10.2026"),
+                                          ("publication_date", "yesterday")])
+def test_add_with_an_invalid_date_asks_for_iso_format(client, case, field, value):
+    data = {"docket": "8C_1/2026", "decision_date": "2026-10-01", field: value,
+            "text": (BytesIO(SUVA_CASE.encode()), "j.txt")}
+    response = client.post("/add", headers=JSON, data=data)
+    assert response.status_code == 400 and response.json["message"] == "Enter dates as YYYY-MM-DD."
+
+
+def test_valid_date():
+    assert dashboard.valid_date("2026-10-01") == date(2026, 10, 1)
+    assert dashboard.valid_date("") is None and dashboard.valid_date(None) is None
 
 
 def test_add_non_utf8_upload_asks_for_a_utf8_file(client, tmp_path):
