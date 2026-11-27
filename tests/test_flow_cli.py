@@ -64,8 +64,9 @@ def test_score_warns_about_unparsed_judgements(settings, capsys):
     assert "1 unparsed" in capsys.readouterr().err
 
 
-def test_score_prints_stored_scores_from_outside_the_window(settings, capsys):
-    seed(settings, "8C_1/2025", date(2025, 10, 2))
+def test_score_lists_only_stored_scores_of_the_scored_window(settings, capsys):
+    seed(settings, "8C_1/2025", date(2025, 10, 2))  # dev window, outside the 2026 challenge window
+    seed(settings, "8C_2/2026", date(2026, 10, 1))  # inside the challenge window
     repo = kb(settings)
     parse_all(repo)
     score_keys(repo, ["8C_1/2025@2025-10-02"], load_rules())
@@ -73,11 +74,8 @@ def test_score_prints_stored_scores_from_outside_the_window(settings, capsys):
 
     assert cli.main(["score", "--window", "challenge", "--today", "2026-11-27"]) == 0
     out = capsys.readouterr().out
-    assert '"scored": 0' in out
-    # BUG: cmd_score lists repo.list_scores(), i.e. every stored score, under "top N stored scores",
-    # so a 2025 decision shows up for the 2026 challenge window. Expected: only the scores of the
-    # window just scored (here: none).
-    assert "top 1 stored scores" in out and "8C_1/2025@2025-10-02" in out
+    assert '"scored": 1' in out and "top 1 stored scores" in out
+    assert "8C_2/2026@2026-10-01" in out and "8C_1/2025@2025-10-02" not in out
 
 
 def test_score_with_custom_rules_file(settings, tmp_path, capsys):

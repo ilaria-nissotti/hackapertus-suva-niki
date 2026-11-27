@@ -120,12 +120,13 @@ def _window(args: argparse.Namespace):
 
 def cmd_score(args: argparse.Namespace) -> int:
     from suva.scoring.rules import load_rules
-    from suva.scoring.store import score_window
+    from suva.scoring.store import score_window, window_judgements
 
     window, ruleset = _window(args), load_rules(args.rules)
     with closing(open_repository(load_settings())) as repo:
         rep = score_window(repo, window, ruleset)
-        top = [s for s in repo.list_scores()][:args.top]
+        in_window = {row["key"] for row in window_judgements(repo, window)}
+        top = [s for s in repo.list_scores() if s["key"] in in_window][:args.top]
     print(json.dumps(rep.as_dict(), indent=2, ensure_ascii=False))
     print(f"\ntop {len(top)} stored scores:")
     for s in top:
