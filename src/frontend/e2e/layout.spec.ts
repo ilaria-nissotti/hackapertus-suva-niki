@@ -19,3 +19,12 @@ test('switching screens does not shift the layout sideways', async ({page}) => {
     expect(await layout()).toEqual(queue);
   }
 });
+
+test('the library filters and the search button stay on one row', async ({page}) => {
+  await page.goto('/?screen=library');
+  await expect(page.getByLabel('Topic', {exact: true}).locator('option').nth(1)).toBeAttached();
+  const tops = await page.locator('.library-filters > :not(.query)').evaluateAll(elements =>
+    elements.map(element => Math.round(element.getBoundingClientRect().bottom)));
+  expect(tops).toHaveLength(6);
+  expect(new Set(tops).size).toBe(1);
+});

@@ -276,11 +276,14 @@ button.call-button:hover:not(:disabled) { background: #164f3a; border-color: #16
 /* Library: approved summaries as a searchable register. */
 .library { display: grid; gap: 1rem; max-width: 72rem }
 .library > p { max-width: 70ch; color: var(--muted) }
-.library-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem 1rem; padding-block: 1rem;
-  border-block: 1px solid var(--rule) }
-.facet { display: grid; gap: .25rem; font-size: .875rem; font-weight: 650; color: var(--muted) }
-.facet.query { flex: 1 1 100% }
-.facet select { min-width: 10rem }
+/* The search on its own line, then the five filters and the button in one row of equal columns: a filter
+   whose options are long sentences (Topic) must not widen its column and wrap the row. */
+.library-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; align-items: end;
+  gap: .75rem 1rem; padding-block: 1rem; border-block: 1px solid var(--rule) }
+@media (max-width: 860px) { .library-filters { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+.facet { display: grid; gap: .25rem; min-width: 0; font-size: .875rem; font-weight: 650; color: var(--muted) }
+.facet.query { grid-column: 1 / -1 }
+.facet select { width: 100%; min-width: 0; text-overflow: ellipsis }
 .library-hits { list-style: none; margin: 0; padding: 0 }
 .library-hits > li { padding: .85rem 0; border-top: 1px solid var(--rule) }
 .library-hits a { font-weight: 700 }
