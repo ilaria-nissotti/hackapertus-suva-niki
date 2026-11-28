@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import type {FormEvent, MouseEvent} from 'react';
 import {createRoot} from 'react-dom/client';
-import {CasePane, Status, views} from './CasePane';
+import {CasePane, Status, statusLabel, views} from './CasePane';
 import type {View} from './CasePane';
 import {displayDate} from './api';
 import type {Dashboard, Language} from './api';
@@ -65,6 +65,9 @@ function App() {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
+
+  // Opening a case or going back to the list is a change of screen: start it at the top.
+  useEffect(() => { window.scrollTo(0, 0); }, [caseKey]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -143,10 +146,10 @@ function App() {
       </div>
     </header>
     <main>
-      <div className="headline">
+      {!caseKey && <div className="headline">
         <h1>Federal Court judgments</h1>
-        <button className="primary" onClick={() => {setAddError(''); dialog.current?.showModal();}}>Add judgment</button>
-      </div>
+        <button onClick={() => {setAddError(''); dialog.current?.showModal();}}>Add judgment</button>
+      </div>}
       <dialog ref={dialog} aria-labelledby="add-title" onCancel={event => {if (busy) event.preventDefault();}}>
         <form ref={form} onSubmit={event => {event.preventDefault(); void action('/add', new FormData(event.currentTarget));}}>
           <h2 id="add-title">Add judgment</h2>
@@ -163,7 +166,7 @@ function App() {
           </div>
         </form>
       </dialog>
-      {dashboard && <div className="coverage">
+      {dashboard && !caseKey && <div className="coverage">
         <dl className="metrics">
           <div><dt>Judgments</dt><dd>{dashboard.count}</dd></div>
           <div><dt>Scored</dt><dd>{dashboard.scored}</dd></div>
@@ -178,14 +181,13 @@ function App() {
         </div>
       </div>}
       {dashboard && dashboard.stale > 0 && <p className="notice warning" role="status">
-        <strong>{dashboard.stale} of {dashboard.count} scores are out of date</strong>, so they show as Stale and
+        <strong>{dashboard.stale} of {dashboard.count} scores are out of date</strong>, so they show as “Score out of date” and
         don’t count toward the shortlist. Run <code>python -m suva parse</code>, then <code>python -m suva score</code>,
         and reload.</p>}
       {notice && <p className="notice" role="status">{notice}</p>}
       {error && <div className="notice" role="alert">{error} <button onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
       {!dashboard && !error && <p role="status">Loading judgments…</p>}
-      {dashboard && <div className={'workspace' + (selected ? ' has-case' : '')}>
-        <section className="panel queue" aria-labelledby="queue-title">
+      {dashboard && !caseKey && <section className="queue" aria-labelledby="queue-title">
           <div className="queue-header">
             <h2 id="queue-title">Review queue <small>{dashboard.total}</small></h2>
             <form className="filters" key={JSON.stringify([params.get('q'), params.get('status'), params.get('sort')])}
@@ -194,30 +196,29 @@ function App() {
               <select name="status" aria-label="Review status" defaultValue={params.get('status') ?? ''}
                 onChange={event => event.currentTarget.form?.requestSubmit()}>
                 <option value="">All statuses</option>
-                {statuses.map(status => <option key={status}>{status}</option>)}
+                {statuses.map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}
               </select>
               <select name="sort" aria-label="Sort by" defaultValue={params.get('sort') === 'date' ? 'date' : 'score'}
                 onChange={event => event.currentTarget.form?.requestSubmit()}>
-                <option value="score">Highest score</option><option value="date">Newest publication</option>
+                <option value="score">Most relevant first</option><option value="date">Newest publication</option>
               </select>
               <button>Search</button>
             </form>
           </div>
           <div className="table-wrap"><table>
-            <thead><tr><th scope="col">Judgment</th><th scope="col">Published</th><th scope="col">Score</th><th scope="col">Status</th></tr></thead>
-            <tbody>{dashboard.rows.map(row => <tr key={row.key} className={row.key === caseKey ? 'selected' : ''}>
-              <td><a href={link({case: row.key, view: null})} onClick={follow}
-                aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
+            <thead><tr><th scope="col">Judgment</th><th scope="col">Published</th><th scope="col">Status</th></tr></thead>
+            <tbody>{dashboard.rows.map(row => <tr key={row.key}>
+              <td><a href={link({case: row.key, view: null})} onClick={follow}>{row.docket}</a>
                 {row.title !== row.docket ? <div className="topic" title={row.issue ?? undefined}>{row.title}</div>
                   : row.issue && <div className="topic">{row.issue}</div>}</td>
-              <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td><td className="score">{row.score === null ? '—' : Math.round(row.score)}</td>
+              <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td>
               <td><Status value={row.status}/></td>
             </tr>)}</tbody>
           </table></div>
           {!dashboard.rows.length && <p className="empty">{!dashboard.count ?
             'No judgments in the window. Run python -m suva fetch, parse and score.'
             : dashboard.stale > 0 && params.get('status') && params.get('status') !== 'Stale' ?
-            `No judgments match these filters. ${dashboard.stale} judgments have out-of-date scores and are listed as Stale until they are re-scored.`
+            `No judgments match these filters. ${dashboard.stale} judgments have out-of-date scores and are listed as “Score out of date” until they are re-scored.`
             : 'No judgments match these filters.'}</p>}
           {dashboard.total > 30 && <nav className="pagination" aria-label="Queue pages">
             {dashboard.page > 2 && <a href={link({page: null})} onClick={follow}>First</a>}
@@ -227,19 +228,13 @@ function App() {
             {(dashboard.page + 1) * 30 < dashboard.total &&
               <a href={link({page: String(Math.ceil(dashboard.total / 30))})} onClick={follow}>Last</a>}
           </nav>}
-        </section>
-        {selected && <CasePane key={selected.key} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
-          selectView={value => navigate(link({view: value}))} selectLanguage={value => navigate(link({lang: value}))}
-          close={close} onClose={follow} action={action} busy={busy}/>}
-        {!caseKey && <section className="panel case-placeholder">
-          <h2>Select a judgment</h2>
-          <p>Choose a case in the queue to see why it was selected, draft the German and French summaries, and ask
-            questions about the ruling.</p>
-        </section>}
-        {caseKey && !selected && <section className="panel empty" role="status">{
-          loadedQuery === dataQuery ? 'Judgment unavailable.' : error ? 'Judgment could not be loaded.' : 'Loading judgment…'
-        } <a href={close} onClick={follow}>Back to queue</a></section>}
-      </div>}
+      </section>}
+      {dashboard && selected && <CasePane key={selected.key} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
+        selectView={value => navigate(link({view: value}))} selectLanguage={value => navigate(link({lang: value}))}
+        close={close} onClose={follow} action={action} busy={busy}/>}
+      {caseKey && !selected && <section className="empty" role="status">{
+        loadedQuery === dataQuery ? 'Judgment unavailable.' : error ? 'Judgment could not be loaded.' : 'Loading judgment…'
+      } <a href={close} onClick={follow}>Back to list</a></section>}
       {dashboard && <footer>Model {dashboard.model}</footer>}
     </main>
   </>;

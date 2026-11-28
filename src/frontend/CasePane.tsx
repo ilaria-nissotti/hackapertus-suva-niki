@@ -7,8 +7,15 @@ import type {Action, Briefing, FiredRule, Judgment, Language} from './api';
 export const views = ['Overview', 'Legal summaries', 'Ask this judgment'] as const;
 export type View = typeof views[number];
 
+/** Plain-language wording for the stored review statuses (the API and the filters keep the stored values). */
+const STATUS_LABELS: Record<string, string> = {
+  'Relevant': 'Read first', 'Review': 'Worth reviewing', 'Low relevance': 'Low relevance',
+  'Stale': 'Score out of date', 'Unscored': 'Not scored',
+};
+export const statusLabel = (value: string) => STATUS_LABELS[value] ?? value;
+
 export function Status({value}: {value: string}) {
-  return <span className={'status ' + value.toLowerCase().replaceAll(' ', '-')}>{value}</span>;
+  return <span className={'status ' + value.toLowerCase().replaceAll(' ', '-')}>{statusLabel(value)}</span>;
 }
 
 function Evidence({label, passages}: {label: string; passages?: string[]}) {
