@@ -75,7 +75,7 @@ test('switching cases keeps the previous panel in place until the next case is r
     const panel = page.locator('.case');
     await expect(panel).toHaveAttribute('inert', '');
     await expect(panel.locator('h2')).toHaveText(SUBJECT);
-    expect(await panel.locator('.case-actions').evaluate(element => getComputedStyle(element).position))
+    expect(await panel.locator('.case-actions:visible').evaluate(element => getComputedStyle(element).position))
       .toBe('static');
   } finally {
     release();
