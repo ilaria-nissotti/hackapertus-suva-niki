@@ -21,6 +21,9 @@ venv/
 node_modules/
 dist/
 build/
+# Playwright run output (the screenshot baselines in e2e/*-snapshots/ are committed)
+test-results/
+playwright-report/
 
 # OS and editor
 .DS_Store
