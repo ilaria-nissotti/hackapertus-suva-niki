@@ -14,8 +14,6 @@
 #      brief are passed to Apertus with the instruction to use the target-language term.
 #   2. Review: a draft that contains the other language's term (e.g. "LAA" in a German
 #      summary) gets a glossary warning in the review workspace. It is a hint, not a rejection.
-#   3. Evaluation: `suva eval-summaries` measures how many glossary terms of Suva's own
-#      summary the draft uses.
 #
 # Many pairs below occur in the supplied DE/FR exports (judgements/Export_*.html).
 

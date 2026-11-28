@@ -1,4 +1,4 @@
-"""Suva's German/French term pairs (`rules/glossary.yaml`): prompt hints, review warnings, evaluation."""
+"""Suva's German/French term pairs (`rules/glossary.yaml`): prompt hints and review warnings."""
 
 from __future__ import annotations
 
@@ -76,8 +76,3 @@ def warnings(summary: str, lang: str, glossary: tuple[Term, ...] | None = None) 
             found.append({"found": wrong, "expected": right})
     return found
 
-
-def terms_in(text: str, lang: str, glossary: tuple[Term, ...] | None = None) -> set[str]:
-    """Glossary terms of `lang` that occur in the text (for evaluation)."""
-    glossary = load_glossary() if glossary is None else glossary
-    return {t.text(lang) for t in glossary if occurs(t.text(lang), text)}

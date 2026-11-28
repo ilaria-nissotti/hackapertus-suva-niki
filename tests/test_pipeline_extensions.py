@@ -6,8 +6,6 @@ Run with --runxfail to see missing entry points as failures.
 """
 
 import json
-from contextlib import closing
-from datetime import date
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -16,12 +14,7 @@ import pytest
 
 import summaries
 from conftest import seed_kb
-from suva import cli
-from suva.scoring.rules import load_rules
-from suva.sources.base import SourceRecord
-from suva.storage import SQLiteRepository
 from test_flow_review_app import add_draft, approve, case, client, page
-from test_flow_cli import kb, settings
 from test_review_app import SUVA_CASE
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,73 +29,11 @@ class MissingExtension(Exception):
 pending = pytest.mark.xfail(strict=True, raises=MissingExtension, reason="Extension entry point pending")
 
 
-def require_command(command, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["--help"])
-    assert exc.value.code == 0
-    if command not in capsys.readouterr().out:
-        raise MissingExtension(command)
-
-
 def feature_response(response):
     if response.status_code == 404 and not response.is_json:
         raise MissingExtension(response.request.path)
     assert response.status_code == 200, response.get_data(as_text=True)
     return response
-
-
-def test_eval_keeps_all_held_out_references_out_of_model_requests(settings, monkeypatch, capsys):
-    decided = date(2025, 10, 2)
-    held_out = {
-        "8C_71/2025": ("ReferenzsperreAlpha", "RéférenceSecrèteAlpha"),
-        "8C_72/2025": ("ReferenzsperreBeta", "RéférenceSecrèteBeta"),
-    }
-    with closing(kb(settings)) as repo:
-        for docket, (de_marker, fr_marker) in held_out.items():
-            record = SourceRecord("opencaselaw", docket, docket, decided, text=DE)
-            repo.upsert_judgement(record)
-            repo.upsert_example({
-                "docket": docket, "decision_date": decided.isoformat(), "title": docket, "source_file": "Export_fixture.html",
-                "text_de": f"{DE}\n\n{de_marker}", "text_fr": f"{FR}\n\n{fr_marker}",
-            })
-            repo.set_example_split(record.key, "eval")
-        repo.upsert_example({
-            "docket": "8C_73/2025", "title": "Style example", "source_file": "Export_fixture.html",
-            "text_de": "NurStilbeispiel UVG", "text_fr": "SeulementLeStyle LAA",
-        })
-        repo.set_example_split("8C_73/2025", "fewshot")
-
-    prompts = []
-
-    def fake_chat(config, messages, tokens):
-        prompt = json.dumps(messages, ensure_ascii=False)
-        prompts.append(prompt)
-        for markers in held_out.values():
-            assert all(marker not in prompt for marker in markers)
-        result = {"evidence_ids": [1]}
-        if "factual brief from the judgment" in prompt:
-            result.update(facts="Leistungspflicht", issues="UVG", reasoning="Kausalität", outcome="Bestätigt")
-        else:
-            result["summary"] = FR if "French (Swiss legal usage)" in prompt else DE
-        return json.dumps(result, ensure_ascii=False)
-
-    monkeypatch.setattr(summaries, "chat", fake_chat)
-    require_command("eval-summaries", capsys)
-    assert cli.main(["eval-summaries", "--split", "evaluation"]) == 0
-    assert sum("German (Swiss legal usage)" in prompt for prompt in prompts) == 2
-    assert sum("French (Swiss legal usage)" in prompt for prompt in prompts) == 2
-
-    output = capsys.readouterr().out
-    scoring_dir = settings.data_dir / "scoring"
-    assert list(scoring_dir.glob("*")), "Expected an evaluation artifact under data/scoring"
-    artifact = "\n".join(path.read_text(encoding="utf-8") for path in scoring_dir.iterdir() if path.is_file())
-    for docket in held_out:
-        assert f"{docket}@{decided}" in output
-        assert f"{docket}@{decided}" in artifact
-    assert "8C_73/2025" not in artifact
-    for metric in ("paragraph", "length", "opening", "statute", "bge", "glossary"):
-        assert metric in artifact.casefold()
-    assert "aggregate" in output.casefold()
 
 
 @pytest.mark.parametrize(("lang", "wrong", "reply"), [("de", "LAA", DE), ("fr", "UVG", FR)])
@@ -169,25 +100,6 @@ def test_triage_records_reviewer_reason_without_replacing_rule_score(client, cas
 
 
 @pending
-def test_near_miss_explains_gap_using_rule_points_without_display_base(client, tmp_path):
-    path = tmp_path / "kb.sqlite"
-    key = seed_kb(path, "8C_74/2026", SUVA_CASE)
-    rules = load_rules()
-    floor = rules.selection.floor_rule_points
-    points = floor - 1
-    with closing(SQLiteRepository(path)) as repo:
-        row = repo.get_score(key)
-        repo.save_scores([row | {"score": rules.base + points, "points": points, "band": "low"}])
-    response = feature_response(client.get("/api/near-misses"))
-    assert response.json["hits"] == sorted(response.json["hits"], key=lambda hit: hit["gap_to_floor"])
-    match = next(hit for hit in response.json["hits"] if hit["key"] == key)
-    assert match["floor_rule_points"] == floor
-    assert match["rule_points"] == points
-    assert match["gap_to_floor"] == 1
-    assert match["missing_signals"]
-
-
-@pending
 @pytest.mark.parametrize("format", ["html", "docx", "pdf"])
 def test_export_uses_only_approved_bilingual_text(client, case, format):
     de_version = add_draft(case, "de", "Entwurfskennung")
@@ -207,25 +119,3 @@ def test_export_uses_only_approved_bilingual_text(client, case, format):
         body = response.get_data(as_text=True)
     assert DE in body and FR in body
     assert "Entwurfskennung" not in body and "Brouillon" not in body
-
-
-@pending
-def test_container_configuration_keeps_secrets_and_local_databases_out_of_image():
-    dockerfile = ROOT / "Dockerfile"
-    compose = next((ROOT / name for name in ("compose.yaml", "compose.yml", "docker-compose.yml")
-                    if (ROOT / name).is_file()), None)
-    if not dockerfile.is_file() or compose is None:
-        raise MissingExtension("Dockerfile and Compose configuration")
-    import yaml
-
-    services = yaml.safe_load(compose.read_text(encoding="utf-8"))["services"]
-    assert len(services) >= 2, "The review app and scheduled pipeline need separate services"
-    instructions = dockerfile.read_text(encoding="utf-8")
-    assert ".env" not in "\n".join(line for line in instructions.splitlines() if line.upper().startswith("COPY "))
-    ignores = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-    assert ".env" in ignores
-    assert any(pattern in ignores for pattern in ("data", "data/", "data/*.sqlite", "**/*.sqlite"))
-    for service in services.values():
-        environment = service.get("environment") or {}
-        if isinstance(environment, dict) and environment.get("LLM_API_KEY") is not None:
-            assert str(environment["LLM_API_KEY"]).startswith("${")

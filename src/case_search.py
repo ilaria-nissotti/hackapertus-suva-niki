@@ -12,11 +12,15 @@ import math
 import re
 
 from suva.parse.citations import extract
-from suva.summary_eval import STOPWORDS
 
 K1, B = 1.2, 0.75
 EXACT_CITATION, SAME_ARTICLE = 4.0, 2.0  # boosts, in BM25 units
-STOP = STOPWORDS["de"] | STOPWORDS["fr"] | {"art", "abs", "lit", "let", "bge", "atf"}
+STOP = set("der die das den dem des ein eine einer eines einem einen und oder ist sind war wurde wird werden "
+           "nicht sich zum zur vom beim auf aus bei mit nach von vor für über unter wegen dass als auch "
+           "sie ihr ihre sein seine diese dieser dieses kann hat haben "
+           "le la les du des un une au aux et ou est sont était ont été être dans par pour avec sur selon "
+           "sans que qui dont cette ces entre elle ils elles son ses leur leurs pas plus peut fait "
+           "art abs lit let bge atf".split())
 _token_cache: dict[tuple[str, str], Counter] = {}
 
 
