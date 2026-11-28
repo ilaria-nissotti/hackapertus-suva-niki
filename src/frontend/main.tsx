@@ -35,6 +35,13 @@ function App() {
   const dataParams = new URLSearchParams(url);
   dataParams.delete('view');
   const dataQuery = dataParams.toString();
+  const caseLoading = Boolean(caseKey && !selected && !error && loadedQuery !== dataQuery);
+  const displayed = selected ?? (caseLoading ? dashboard?.selected : null);
+  const lastCaseView = useRef({view, lang});
+  useEffect(() => {
+    if (selected) lastCaseView.current = {view, lang};
+  }, [selected, view, lang]);
+  const displayedView = selected ? {view, lang} : lastCaseView.current;
 
   function link(changes: Record<string, string | null>) {
     const next = new URLSearchParams(location.search);
@@ -50,6 +57,7 @@ function App() {
     history.pushState(null, '', href);
     context.current = location.search;
     setUrl(location.search);
+    setError('');
     setNotice('');
   }
 
@@ -63,6 +71,7 @@ function App() {
     const onPop = () => {
       context.current = location.search;
       setUrl(location.search);
+      setError('');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -181,7 +190,7 @@ function App() {
       {notice && <p className="notice" role="status">{notice}</p>}
       {error && <div className="notice" role="alert">{error} <button onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
       {!dashboard && !error && <p role="status">Loading judgments…</p>}
-      {dashboard && <div className={'workspace' + (selected ? ' has-case' : '')}>
+      {dashboard && <div className={'workspace' + (displayed ? ' has-case' : '')}>
         <section className="panel queue" aria-labelledby="queue-title">
           <div className="queue-header">
             <div className="queue-heading">
@@ -225,15 +234,17 @@ function App() {
               <a href={link({page: String(Math.ceil(dashboard.total / 30))})} onClick={follow}>Last</a>}
           </nav>}
         </section>
-        {selected && <CasePane key={selected.key} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
+        {displayed && <CasePane key={displayed.key} record={displayed} lang={displayedView.lang}
+          view={displayedView.view} audio={dashboard.lang === displayedView.lang ? dashboard.audio : {}}
           selectView={value => navigate(link({view: value}))} selectLanguage={value => navigate(link({lang: value}))}
-          close={close} onClose={follow} action={action} busy={busy}/>}
-        {!caseKey && <section className="panel case-placeholder">
-          <h2>Select a judgment</h2>
+          close={close} onClose={follow} action={action} busy={busy} switching={caseLoading}/>}
+        {!displayed && (!caseKey || caseLoading) && <section className="panel case-placeholder" aria-busy={caseLoading}>
+          <h2>{caseLoading ? 'Loading judgment…' : 'Select a judgment'}</h2>
         </section>}
-        {caseKey && !selected && <section className="panel empty" role="status">{
-          loadedQuery === dataQuery ? 'Judgment unavailable.' : error ? 'Judgment could not be loaded.' : 'Loading judgment…'
-        } <a href={close} onClick={follow}>Back to queue</a></section>}
+        {caseKey && !displayed && !caseLoading && <section className="panel empty" role="status">
+          {error ? 'Judgment could not be loaded.' : 'Judgment unavailable.'}{' '}
+          <a href={close} onClick={follow}>Back to queue</a>
+        </section>}
       </div>}
     </main>
   </>;

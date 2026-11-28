@@ -60,6 +60,30 @@ test('the publication cell opens its judgment without clicking the docket', asyn
   await expect(page.getByRole('heading', {name: SUBJECT})).toBeVisible();
 });
 
+test('switching cases keeps the previous panel in place until the next case is ready', async ({page}) => {
+  await open(page, caseUrl(RELEVANT));
+  await expect(page.getByRole('heading', {name: SUBJECT})).toBeVisible();
+  let release = () => {};
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/dashboard?*', async route => {
+    const key = new URL(route.request().url()).searchParams.get('case');
+    if (key?.startsWith('8C_902/')) await pending;
+    await route.continue();
+  });
+  try {
+    await page.getByRole('link', {name: '8C_902/2026'}).click();
+    const panel = page.locator('.case');
+    await expect(panel).toHaveAttribute('inert', '');
+    await expect(panel.locator('h2')).toHaveText(SUBJECT);
+    expect(await panel.locator('.case-actions').evaluate(element => getComputedStyle(element).position))
+      .toBe('static');
+  } finally {
+    release();
+  }
+  await expect(page.getByRole('heading', {name: 'Unfallversicherung (Integritätsentschädigung)'})).toBeVisible();
+  await expect(page.locator('.case')).not.toHaveAttribute('inert', '');
+});
+
 test.describe('keyboard', () => {
   test('a case opens from the keyboard', async ({page}) => {
     await open(page, '/');

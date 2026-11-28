@@ -177,10 +177,10 @@ function Summary({record, lang, audio, action, busy, visible}: {
   </>;
 }
 
-export function CasePane({record, audio, lang, view, selectView, selectLanguage, close, onClose, action, busy}: {
+export function CasePane({record, audio, lang, view, selectView, selectLanguage, close, onClose, action, busy, switching}: {
   record: Judgment; audio: Briefing; lang: Language; view: View;
   selectView: (view: View) => void; selectLanguage: (lang: Language) => void;
-  close: string; onClose: (event: MouseEvent<HTMLAnchorElement>) => void; action: Action; busy: boolean;
+  close: string; onClose: (event: MouseEvent<HTMLAnchorElement>) => void; action: Action; busy: boolean; switching: boolean;
 }) {
   const result = record[lang];
   const drafting = record.de.active || record.fr.active;
@@ -198,7 +198,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       void action('/run', fields({case: record.key, action: 'summarize'}));
     }
   }
-  return <article className="panel case" aria-labelledby="case-title">
+  return <article className="panel case" aria-labelledby="case-title" inert={switching} aria-busy={switching}>
     <header className="case-header">
       <a className="back" href={close} onClick={onClose}>Back to queue</a>
       <div className="case-identity">
@@ -244,7 +244,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
         </div>
       </div>
       <div hidden={view !== 'Legal summaries'}>
-        <Summary key={JSON.stringify([lang, record[lang].version])} record={record} lang={lang} audio={audio} action={action} busy={busy} visible={view === 'Legal summaries'}/>
+        <Summary key={JSON.stringify([lang, record[lang].version])} record={record} lang={lang} audio={audio} action={action} busy={busy} visible={!switching && view === 'Legal summaries'}/>
       </div>
       {view === 'Ask this judgment' && <Conversation key={lang} caseKey={record.key} lang={lang}/>}
     </div>

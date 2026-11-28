@@ -156,7 +156,7 @@ tr.selected, tr.selected:hover { background: var(--sheet); box-shadow: inset 3px
 .leading-reasons { margin: .5rem 0 0; padding-inline-start: 1.1rem }
 .leading-reasons li + li { margin-top: .3rem }
 .case-actions {
-  position: sticky; bottom: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: .6rem;
+  display: flex; flex-wrap: wrap; gap: .6rem;
   align-items: center; margin-top: 1.3rem; padding-block: .75rem .35rem;
   background: var(--sheet); border-top: 1px solid var(--rule);
 }
