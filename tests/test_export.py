@@ -39,3 +39,13 @@ def test_export_needs_both_approved_languages(client, case):
     assert response.status_code == 409 and "FR" in response.json["message"]
     assert client.get("/api/export", query_string={"case": case, "format": "txt"}).status_code == 400
 
+
+
+def test_export_names_each_author_once_in_suva_format():
+    frei = {"name": "Frei Thomas", "initials": "FRT", "function": "Rechtsanwalt"}
+    villa = {"name": "Villa Rebeca", "initials": "VIL", "function": ""}
+    html = export.to_html(export.document(RECORD, DE, FR, [frei, frei])).decode()
+    assert "<h2>Autor</h2><p>Frei Thomas (FRT), Rechtsanwalt</p>" in html
+    both = export.to_html(export.document(RECORD, DE, FR, [frei, villa])).decode()
+    assert "<p>Frei Thomas (FRT), Rechtsanwalt</p><p>Villa Rebeca (VIL)</p>" in both
+    assert "Autor" not in export.to_html(export.document(RECORD, DE, FR)).decode()

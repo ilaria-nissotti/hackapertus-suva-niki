@@ -10,16 +10,20 @@ action that changes rules/rules.yaml; the window is then rescored.
 import argparse
 from collections import Counter
 from contextlib import closing
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
+import re
+import secrets
 import threading
 from urllib.parse import urlsplit
 
-from flask import Flask, abort, jsonify, redirect, request, send_file, send_from_directory, url_for
+from flask import Flask, abort, g, jsonify, redirect, request, send_file, send_from_directory, session, url_for
+from flask.sessions import SecureCookieSessionInterface
 
 import briefing
 import conversation
@@ -39,11 +43,42 @@ app.config.update(MAX_CONTENT_LENGTH=4 * 1024 * 1024,
                   DATABASE=_settings.data_dir / "review.sqlite",
                   KB=_settings.sqlite_path,
                   DATASET=_settings.data_dir / "scoring" / "dataset.jsonl",  # labelled dev window (`suva dataset`)
-                  TODAY=None)  # reference date of the challenge window (None = today)
+                  TODAY=None,  # reference date of the challenge window (None = today)
+                  SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
 jobs.settings = app.config  # the jobs read DATABASE, KB, DATASET and TODAY from here
 queue_read_lock = threading.Lock()
 weights_lock = threading.Lock()  # one accept at a time: it rewrites rules.yaml
 FEEDBACK_THRESHOLD = 30  # new verdicts after which the queue suggests updating the rule weights
+
+
+def ensure_secret_key():
+    """The key that signs the session cookie (which holds who is reviewing): SUVA_SECRET_KEY, else a random key
+    kept beside the review database (created once, readable only by its owner)."""
+    if app.secret_key:
+        return
+    if os.environ.get("SUVA_SECRET_KEY"):
+        app.secret_key = os.environ["SUVA_SECRET_KEY"]
+        return
+    path = Path(app.config["DATABASE"]).parent / "session-secret"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
+            handle.write(secrets.token_hex(32))
+    except FileExistsError:
+        pass
+    app.secret_key = path.read_text().strip()
+
+
+class ReviewSessions(SecureCookieSessionInterface):
+    """Flask opens the session before any before_request hook, so the key is loaded here."""
+
+    def open_session(self, app_, request_):
+        ensure_secret_key()
+        return super().open_session(app_, request_)
+
+
+app.session_interface = ReviewSessions()
 
 
 @app.before_request
@@ -53,6 +88,53 @@ def reject_cross_site_writes():
         if (origin and origin.rstrip("/") != request.host_url.rstrip("/")
                 or request.headers.get("Sec-Fetch-Site") == "cross-site"):
             abort(403)
+
+
+# Who is reviewing: entered once on the start page (no account, no password) and kept in the signed session
+# cookie. Approvals and assessments are signed with it. Everything but the page shell and the session itself
+# waits for it.
+PUBLIC_ENDPOINTS = {"dashboard", "frontend_asset", "conversation_portrait", "start_page", "session_info",
+                    "start_session", "end_session", "static"}
+INITIALS = re.compile(r"[A-Z0-9]{1,6}")
+
+
+@app.before_request
+def require_reviewer():
+    g.reviewer = session.get("reviewer")
+    if g.reviewer is None and request.endpoint not in PUBLIC_ENDPOINTS:
+        return jsonify(message="Enter your name to start reviewing."), 401
+
+
+@app.get("/start")
+def start_page():
+    return dashboard()
+
+
+@app.get("/api/session")
+def session_info():
+    response = jsonify(reviewer=g.reviewer)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/session")
+def start_session():
+    body = request.get_json(silent=True) or {}
+    name, initials, function = (" ".join(str(body.get(field) or "").split()) for field in ("name", "initials", "function"))
+    initials = initials.upper()
+    if not 2 <= len(name) <= 80 or not INITIALS.fullmatch(initials) or len(function) > 80:
+        return jsonify(message="Enter your name (2–80 characters) and initials (1–6 letters or digits)."), 400
+    session.clear()
+    session.permanent = True
+    session["reviewer"] = {"name": name, "initials": initials, "function": function}
+    app.logger.info("reviewer_started initials=%s", initials)
+    return jsonify(reviewer=session["reviewer"])
+
+
+@app.post("/api/session/end")
+def end_session():
+    session.clear()
+    return jsonify(reviewer=None)
 
 
 def valid_date(value):
@@ -80,12 +162,17 @@ def present(db, record, config):
         # never says "not active" while still missing the result it just committed.
         active = jobs.is_pending((record["key"], kind))
         row = jobs.get_result(db, record, kind, config)
+        signed = review_store.signature(db, record["key"], kind, row["version"]) if row and row["approved"] else None
         result[kind] = {
             "version": row["version"] if row and row["payload"] else None,
             "data": json.loads(row["payload"]) if row and row["payload"] else {},
             "error": row["error"] if row else None,
             "approved": row["approved"] if row else None,
             "active": active,
+            # Who approved it (None for approvals saved before signatures existed).
+            "signer": review_store.signer(signed),
+            "signer_function": signed["function"] if signed else "",
+            "signed_at": signed["signed_at"] if signed else None,
         }
     return result
 
@@ -196,6 +283,8 @@ def library_hits(query="", lang=None):
 
     with closing(connect()) as db:
         rows = review_store.search_library(db, query, lang)
+        signed = {(row["case_key"], row["lang"]): review_store.signature(db, row["case_key"], row["lang"])
+                  for row in rows}
     with closing(kb()) as repo:
         meta = review_kb.case_metadata(repo, {row["case_key"] for row in rows})
     hits = []
@@ -205,8 +294,10 @@ def library_hits(query="", lang=None):
             continue
         # Statutes: laws cited by the judgement or by the approved summary (a summary often cites none).
         laws = set(info["laws"]) | {c.law for c in extract(row["summary"]) if c.kind == "statute" and c.law}
+        signature = signed[(row["case_key"], row["lang"])]
         hits.append({"key": row["case_key"], "language": row["lang"], "approved_at": row["approved_at"],
-                     "snippet": row["snippet"], "statutes": sorted(laws)}
+                     "snippet": row["snippet"], "statutes": sorted(laws), "signer": review_store.signer(signature),
+                     "signer_function": signature["function"] if signature else ""}
                     | {k: v for k, v in info.items() if k != "laws"})
     return hits
 
@@ -316,7 +407,7 @@ def save_triage_feedback():
         return jsonify(message="Judgment not found."), 404
     with closing(connect()) as db:
         # The rule points at the time of the assessment, so a later rules change can be compared against it.
-        review_store.save_triage_feedback(db, key, status, reason.strip(), record["points"])
+        review_store.save_triage_feedback(db, key, status, reason.strip(), record["points"], g.reviewer)
         saved = review_store.triage_feedback(db, key)
     app.logger.info("triage_feedback case=%s status=%s rule_status=%s", key, status, record["status"])
     return jsonify(case=key, triage_feedback=saved, message="Assessment saved.")
@@ -430,12 +521,14 @@ def export_summary():
         return jsonify(message="Judgment not found."), 404
     config = jobs.current_config()
     with closing(connect()) as db:
-        approved = {lang: (jobs.get_result(db, record, lang, config) or {"approved": None})["approved"]
-                    for lang in ("de", "fr")}
+        rows = {lang: jobs.get_result(db, record, lang, config) for lang in ("de", "fr")}
+        approved = {lang: row["approved"] if row else None for lang, row in rows.items()}
+        signatures = [review_store.signature(db, record["key"], lang, row["version"])
+                      for lang, row in rows.items() if row and row["approved"]]
     missing = [lang.upper() for lang, text in approved.items() if not text]
     if missing:
         return jsonify(message=f"Approve the {' and '.join(missing)} summary before exporting."), 409
-    doc = export.document(record, approved["de"], approved["fr"])
+    doc = export.document(record, approved["de"], approved["fr"], [s for s in signatures if s])
     response = send_file(BytesIO(export.RENDER[fmt](doc)), mimetype=export.FORMATS[fmt],
                          as_attachment=fmt != "html", download_name=export.filename(record["docket"], fmt))
     response.headers["Cache-Control"] = "private, no-store"
@@ -579,7 +672,7 @@ def approve():
         # Only overwrite the approval this page saw: a second tab saving the same draft version must reload
         # instead of silently replacing the first tab's edit. The condition makes the check atomic.
         if not review_store.approve(db, key, lang, row["version"], summary,
-                                    request.form.get("previous_approved", "")):
+                                    request.form.get("previous_approved", ""), g.reviewer):
             app.logger.info("approve_conflict case=%s lang=%s reason=approval_changed", key, lang)
             return action_result(key, "Another approval was saved for this draft. Reload it and review it "
                                       "before approving.", 409)

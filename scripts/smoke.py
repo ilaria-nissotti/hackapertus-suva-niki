@@ -12,6 +12,7 @@ every check passed; the server log is kept for inspection. See SMOKE_TEST.md.
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import os
 import socket
@@ -75,6 +76,8 @@ class Smoke:
         self.servers: list[subprocess.Popen] = []
         self.base = ""
         self.secret = f"sk-smoke-{uuid.uuid4().hex}"  # offline dummy key: must never show up in a log
+        # The app asks who is reviewing first: requests carry the session cookie of a fictional smoke reviewer.
+        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     # --- reporting --------------------------------------------------------------------------
     def check(self, name: str, ok: bool, detail: str = "") -> bool:
@@ -119,7 +122,11 @@ class Smoke:
             if proc.poll() is not None:
                 break
             try:
-                urllib.request.urlopen(base + "/api/dashboard", timeout=1).close()
+                urllib.request.urlopen(base + "/api/session", timeout=1).close()
+                status, _, _ = self.request("POST", "/api/session", base=base, json_body={
+                    "name": "Smoke Reviewer", "initials": "SMK", "function": "Rechtsanwalt"})
+                if status != 200:
+                    raise RuntimeError(f"could not enter the reviewer on {base}: HTTP {status}")
                 return proc, base, log_path
             except OSError:
                 time.sleep(0.2)
@@ -145,7 +152,7 @@ class Smoke:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         req = urllib.request.Request((base or self.base) + path, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with self.opener.open(req, timeout=60) as resp:
                 status, body, ctype = resp.status, resp.read(), resp.headers.get_content_type()
         except urllib.error.HTTPError as exc:
             status, body, ctype = exc.code, exc.read(), exc.headers.get_content_type()

@@ -52,3 +52,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 *.tsbuildinfo
+
+# Review app: key of the session cookie that holds who is reviewing (src/app.py), and the browser tests' reviewer
+data/session-secret
+src/frontend/playwright/.auth/

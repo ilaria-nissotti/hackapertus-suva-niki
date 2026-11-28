@@ -1,12 +1,16 @@
 export type Language = 'de' | 'fr';
-type Result<T> = {version: string | null; data: Partial<T>; error: string | null; approved: string | null; active: boolean};
+export type Reviewer = {name: string; initials: string; function: string};
+export type Signer = {name: string; initials: string};
+type Result<T> = {version: string | null; data: Partial<T>; error: string | null; approved: string | null; active: boolean;
+  signer?: Signer | null; signer_function?: string; signed_at?: string | null};
 export type QueueRow = {
   key: string; docket: string; title: string; publication_date: string | null; decision_date: string | null;
   score: number | null; status: string; issue?: string | null;
 };
 export type GlossaryWarning = {found: string; expected: string};
 type Draft = {summary: string; quotes: string[]; glossary_warnings: GlossaryWarning[]};
-export type TriageFeedback = {status: string; reason: string; rule_points: number | null; saved_at: string};
+export type TriageFeedback = {status: string; reason: string; rule_points: number | null; saved_at: string;
+  signer: Signer | null; signer_function: string};
 export type FiredRule = {id: string; points: number; explanation: string};
 export type Judgment = Omit<QueueRow, 'issue'> & {
   date_source: string | null; source_url: string | null; decision: string | null; full_text: string; language: string | null;
@@ -94,7 +98,7 @@ export function operativeText(decision: string) {
 export type Facet = {value: string; count: number; label?: string};
 export type LibraryHit = {
   key: string; docket: string; title: string; language: string; decision_date: string | null;
-  approved_at: string; snippet: string; statutes: string[]; outcome: string[];
+  approved_at: string; snippet: string; statutes: string[]; outcome: string[]; signer: Signer | null;
   topics: {id: string; explanation: string}[];
 };
 export type LibraryPage = {hits: LibraryHit[]; total: number;
@@ -105,3 +109,17 @@ export type CaseSearchHit = {
   key: string; docket: string; title: string; decision_date: string | null; status: string; relevance: number;
   matches: {kind: string; value: string}[]; highlights: string[];
 };
+
+/** Suva's author line: "Frei Thomas (FRT), Rechtsanwalt". */
+export function authorLine(signer: Signer, role?: string) {
+  return `${signer.name} (${signer.initials})` + (role ? `, ${role}` : '');
+}
+
+/** A UTC timestamp from the server ("2026-11-28 09:22:50") as local date and time: "28 Nov 2026, 10:22". */
+export function signedAt(value: string | null | undefined) {
+  if (!value) return '';
+  const date = new Date(value.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(date.getTime())) return value;
+  const time = date.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+  return `${displayDate(date.toLocaleDateString('sv-SE'))}, ${time}`;
+}

@@ -94,7 +94,7 @@ def test_crashed_summary_job_shows_an_error_on_the_dashboard(client, case, monke
     assert jobs.run_summary_job(case, "de") is False
     de = client.get("/api/dashboard", query_string={"case": case}).json["selected"]["de"]
     assert de == {"version": None, "data": {}, "error": "The summary job failed unexpectedly. Try again.",
-                  "approved": None, "active": False}
+                  "approved": None, "active": False, "signer": None, "signer_function": "", "signed_at": None}
 
 
 def test_crashed_job_never_overwrites_a_finished_draft(client, case, monkeypatch):

@@ -128,7 +128,8 @@ export function Library({params, link, follow, navigate}: {
         <a href={caseLink(hit)} onClick={follow}>{hit.docket}</a>{' '}
         <span className="muted">{LANGUAGES[hit.language] ?? hit.language} · decided {displayDate(hit.decision_date)}
           {hit.outcome.length > 0 && ' · ' + hit.outcome.map(value => OUTCOMES[value] ?? value).join(', ')}
-          {hit.statutes.length > 0 && ' · ' + hit.statutes.join(', ')}</span>
+          {hit.statutes.length > 0 && ' · ' + hit.statutes.join(', ')}
+          {hit.signer && ` · approved by ${hit.signer.name} (${hit.signer.initials})`}</span>
         {hit.title !== hit.docket && <div className="topic">{hit.title}</div>}
         <Snippet text={hit.snippet}/>
       </li>)}</ol>

@@ -55,6 +55,11 @@ def closed_port() -> int:
         return sock.getsockname()[1]  # released again: nothing listens, so every Apertus call fails fast
 
 
+# The fictional reviewer the browser tests enter on the start page (src/frontend/e2e/auth.setup.ts); the
+# pre-approved summary is signed with it.
+REVIEWER = {"name": "Muster Anna", "initials": "MUA", "function": "Rechtsanwältin"}
+
+
 def build(work: Path, llm_base_url: str) -> None:
     sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests")]
     from conftest import seed_kb  # the same seeding the review app tests use
@@ -72,7 +77,7 @@ def build(work: Path, llm_base_url: str) -> None:
     with closing(review_store.connect(work / "review.sqlite")) as db:
         review_store.save_result(db, keys[0], "de", version,
                                  json.dumps({"summary": APPROVED, "quotes": [EVIDENCE]}, ensure_ascii=False), None)
-        assert review_store.approve(db, keys[0], "de", version, APPROVED, "")
+        assert review_store.approve(db, keys[0], "de", version, APPROVED, "", REVIEWER)
         assert sqlite3.connect(work / "review.sqlite").execute("SELECT COUNT(*) FROM results").fetchone()[0] == 1
 
 

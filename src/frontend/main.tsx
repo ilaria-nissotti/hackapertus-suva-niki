@@ -5,19 +5,53 @@ import {CasePane, Status, views} from './CasePane';
 import {Library} from './Library';
 import {CaseSearch} from './CaseSearch';
 import {Weights} from './Weights';
+import {Start} from './Start';
 import type {PrecedentSearch} from './CaseSearch';
 import type {View} from './CasePane';
 import {displayDate, judgmentSubject} from './api';
 import {Button, Collapsible, Input} from './components/ui/controls';
-import type {Dashboard, Language} from './api';
+import type {Dashboard, Language, Reviewer} from './api';
 import '@fontsource-variable/atkinson-hyperlegible-next';
 import '@fontsource-variable/literata';
 import './style.css';
 
 const count = new Intl.NumberFormat('en');
+
+// Without a reviewer in the session (new browser, session expired), every screen goes back to the start page.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args: Parameters<typeof fetch>) => {
+  const response = await nativeFetch(...args);
+  if (response.status === 401 && location.pathname !== '/start') location.assign('/start');
+  return response;
+};
+
+async function changeReviewer() {
+  await nativeFetch('/api/session/end', {method: 'POST'}).catch(() => undefined);
+  location.assign('/start');
+}
+
+/** The start page (who is reviewing), or the app once the session names the reviewer. */
+function Root() {
+  const [reviewer, setReviewer] = useState<Reviewer | null>();
+  const [failed, setFailed] = useState(false);
+  const starting = location.pathname === '/start';
+  useEffect(() => {
+    if (starting) return;
+    fetch('/api/session').then(response => response.json()).then(({reviewer}: {reviewer: Reviewer | null}) => {
+      if (reviewer) setReviewer(reviewer);
+      else location.assign('/start');
+    }).catch(failure => {
+      console.warn('session_load_failed', {reason: String(failure)});
+      setFailed(true);
+    });
+  }, [starting]);
+  if (starting) return <Start/>;
+  if (reviewer) return <App reviewer={reviewer}/>;
+  return <main><p role={failed ? 'alert' : 'status'}>{failed ? 'Could not reach the review app. Reload the page.' : 'Loading…'}</p></main>;
+}
 const statuses = ['Relevant', 'Review', 'Low relevance', 'Stale', 'Unscored'];
 
-function App() {
+function App({reviewer}: {reviewer: Reviewer}) {
   const [url, setUrl] = useState(location.search);
   const [dashboard, setDashboard] = useState<Dashboard>();
   const [loadedQuery, setLoadedQuery] = useState<string>();
@@ -198,7 +232,10 @@ function App() {
           <a href="/?screen=library" onClick={follow} aria-current={screen === 'library' ? 'page' : undefined}>Library</a>
           <a href="/?screen=weights" onClick={follow} aria-current={screen === 'weights' ? 'page' : undefined}>Rule weights</a>
         </nav>
-        <span className="challenge">Suva</span>
+        <div className="challenge account">
+          <span title={reviewer.function || undefined}>Reviewing as {reviewer.name} ({reviewer.initials})</span>
+          <Button variant="ghost" onClick={() => void changeReviewer()}>Change</Button>
+        </div>
       </div>
     </header>
     {screen === 'library' ? <main><Library params={params} link={link} follow={follow} navigate={navigate}/></main> :
@@ -308,4 +345,4 @@ function App() {
   </>;
 }
 
-createRoot(document.getElementById('root')!).render(<App/>);
+createRoot(document.getElementById('root')!).render(<Root/>);

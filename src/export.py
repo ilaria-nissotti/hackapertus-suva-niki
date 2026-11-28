@@ -35,9 +35,17 @@ def bger_url(docket, decision_date):
             f"{docid}&lang=de&zoom=&type=show_document")
 
 
-def document(record, de, fr):
+def author(signature):
+    """Suva's author line: 'Frei Thomas (FRT), Rechtsanwalt'."""
+    line = f"{signature['name']} ({signature['initials']})"
+    return f"{line}, {signature['function']}" if signature["function"] else line
+
+
+def document(record, de, fr, signatures=()):
+    """`signatures`: who approved the German and French summaries (one author line each, the same one once)."""
     return {"title": title(record["docket"], record["decision_date"]), "de": de, "fr": fr,
-            "url": record.get("source_url") or bger_url(record["docket"], record["decision_date"])}
+            "url": record.get("source_url") or bger_url(record["docket"], record["decision_date"]),
+            "authors": list(dict.fromkeys(author(s) for s in signatures))}
 
 
 def paragraphs(text):
@@ -48,6 +56,8 @@ def sections(doc):
     out = [("Text DE", paragraphs(doc["de"])), ("Text FR", paragraphs(doc["fr"]))]
     if doc["url"]:
         out.append(("Link zum Urteil", [doc["url"]]))
+    if doc.get("authors"):
+        out.append(("Autor", doc["authors"]))
     return out
 
 

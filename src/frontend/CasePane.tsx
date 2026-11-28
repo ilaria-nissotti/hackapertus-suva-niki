@@ -1,7 +1,7 @@
 import type {MouseEvent} from 'react';
 import {useEffect, useId, useRef, useState} from 'react';
 import {Conversation} from './Conversation';
-import {displayDate, fields, judgmentSubject, operativeText} from './api';
+import {authorLine, displayDate, fields, judgmentSubject, operativeText, signedAt} from './api';
 import {Badge, Button, Collapsible, Textarea} from './components/ui/controls';
 import type {Action, Briefing, FiredRule, Judgment, Language, TriageFeedback} from './api';
 
@@ -116,7 +116,6 @@ function Assessment({record}: {record: Judgment}) {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.message || 'Could not save the assessment.');
       setSaved(body.triage_feedback);
-      setMessage(body.message);
     } catch (failure) {
       console.warn('triage_feedback_failed', {reason: String(failure)});
       setMessage(failure instanceof Error ? failure.message : 'Could not save the assessment.');
@@ -137,9 +136,10 @@ function Assessment({record}: {record: Judgment}) {
       <Textarea rows={3} maxLength={2000} value={reason} onChange={event => setReason(event.target.value)}/>
     </label>
     <Button type="submit" variant="outline" disabled={busy || !status}>{saved ? 'Update assessment' : 'Save assessment'}</Button>
-    {message && <p role="status">{message}</p>}
-    {saved && !message && <p className="muted">Saved: {saved.status}{AGREES[saved.status] !== record.status &&
-      ` (rules: ${record.status})`}.</p>}
+    {message && <p role="alert">{message}</p>}
+    {saved && !message && <p className="muted" role="status">
+      {saved.signer ? `Saved by ${authorLine(saved.signer, saved.signer_function)}` : 'Saved'}: {saved.status}
+      {AGREES[saved.status] !== record.status && ` (rules: ${record.status})`}.</p>}
   </form>;
 }
 
@@ -201,6 +201,9 @@ function Summary({record, lang, audio, action, busy, visible}: {
                 setSaveStatus('');
               }}/>
           </label>
+          {result.approved && <p className="signature">{result.signer
+            ? <>Approved by <strong>{authorLine(result.signer, result.signer_function)}</strong> · {signedAt(result.signed_at)}</>
+            : 'Approved before signatures existed: unsigned. Save the approved text again to sign it.'}</p>}
           {saveStatus && <p className="save-feedback" role="status">{saveStatus}</p>}
           {saveError && <p className="save-feedback" role="alert">{saveError}</p>}
         </form> : (record.de.active || record.fr.active) && <p role="status">Generating summaries…</p>}

@@ -21,12 +21,19 @@ SCHEMA = """
     );
     CREATE TABLE IF NOT EXISTS triage_feedback (
         case_key TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
-        rule_points REAL, saved_at TEXT NOT NULL DEFAULT (datetime('now'))
+        rule_points REAL, saved_at TEXT NOT NULL DEFAULT (datetime('now')),
+        signer_name TEXT, signer_initials TEXT, signer_function TEXT
     );
     CREATE TABLE IF NOT EXISTS weight_proposals (
         id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
         status TEXT NOT NULL, payload TEXT, error TEXT, decided_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS signatures (
+        id INTEGER PRIMARY KEY, case_key TEXT NOT NULL, kind TEXT NOT NULL, version TEXT NOT NULL,
+        name TEXT NOT NULL, initials TEXT NOT NULL, function TEXT NOT NULL DEFAULT '',
+        signed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS signatures_case ON signatures (case_key, kind, id);
     CREATE VIRTUAL TABLE IF NOT EXISTS library USING fts5(
         case_key UNINDEXED, lang UNINDEXED, approved_at UNINDEXED, summary,
         tokenize = 'unicode61 remove_diacritics 2'
@@ -40,8 +47,24 @@ def connect(path):
     db = sqlite3.connect(path, timeout=20)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    add_missing_columns(db, "triage_feedback", {"signer_name": "TEXT", "signer_initials": "TEXT",
+                                                 "signer_function": "TEXT"})
     backfill_library(db)
     return db
+
+
+def add_missing_columns(db, table, columns):
+    """Additive schema change for databases created before these columns existed."""
+    present = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+    for name, kind in columns.items():
+        if name in present:
+            continue
+        try:
+            with db:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+        except sqlite3.OperationalError as exc:  # another connection added it in the meantime
+            if "duplicate column name" not in str(exc):
+                raise
 
 
 def backfill_library(db):
@@ -81,32 +104,60 @@ def save_result_error(db, key, kind, version, error):
             DO UPDATE SET error=excluded.error WHERE results.payload IS NULL""", (key, kind, version, error))
 
 
-def approve(db, key, kind, version, summary, previous_approved):
-    """Save the approval only if it still is the one the reviewer saw (atomic check). True if saved."""
+def approve(db, key, kind, version, summary, previous_approved, signer):
+    """Save the approval only if it still is the one the reviewer saw (atomic check), signed by `signer`
+    ({"name", "initials", "function"} of the reviewer who approved it) in the same transaction. True if saved."""
     with db:
         saved = db.execute("""UPDATE results SET approved=? WHERE case_key=? AND kind=? AND version=?
                               AND COALESCE(approved, '') = ?""", (summary, key, kind, version, previous_approved))
-        if saved.rowcount == 1:  # the library holds the latest approval per case and language
+        if saved.rowcount == 1:
+            db.execute("""INSERT INTO signatures (case_key, kind, version, name, initials, function)
+                VALUES (?, ?, ?, ?, ?, ?)""", (key, kind, version, signer["name"], signer["initials"], signer["function"]))
+            # the library holds the latest approval per case and language
             db.execute("DELETE FROM library WHERE case_key=? AND lang=?", (key, kind))
             db.execute("INSERT INTO library (case_key, lang, approved_at, summary) VALUES (?, ?, datetime('now'), ?)",
                        (key, kind, summary))
     return saved.rowcount == 1
 
 
+def signature(db, key, kind, version=None):
+    """The latest signature of an approval: of that draft version, or of the case and language (any version)."""
+    sql = "SELECT * FROM signatures WHERE case_key=? AND kind=?" + (" AND version=?" if version else "")
+    return db.execute(sql + " ORDER BY id DESC LIMIT 1", (key, kind, *([version] if version else []))).fetchone()
+
+
+def signer(row, prefix=""):
+    """{"name", "initials"} of a signature or of a signed row (columns prefixed with `prefix`), or None."""
+    if not row or not row[prefix + "name"]:
+        return None
+    return {"name": row[prefix + "name"], "initials": row[prefix + "initials"]}
+
+
 # Reviewer triage: agreement or disagreement with the rules score, kept apart from the score itself.
 
-def save_triage_feedback(db, key, status, reason, rule_points):
+def save_triage_feedback(db, key, status, reason, rule_points, reviewer):
     with db:
-        db.execute("""INSERT INTO triage_feedback (case_key, status, reason, rule_points) VALUES (?, ?, ?, ?)
+        db.execute("""INSERT INTO triage_feedback (case_key, status, reason, rule_points, signer_name,
+                                                   signer_initials, signer_function)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(case_key) DO UPDATE SET status=excluded.status, reason=excluded.reason,
-            rule_points=excluded.rule_points, saved_at=datetime('now')""", (key, status, reason, rule_points))
+            rule_points=excluded.rule_points, signer_name=excluded.signer_name,
+            signer_initials=excluded.signer_initials, signer_function=excluded.signer_function,
+            saved_at=datetime('now')""", (key, status, reason, rule_points, reviewer["name"],
+                                          reviewer["initials"], reviewer["function"]))
+
+
+def _feedback(row):
+    return {"case_key": row["case_key"], "status": row["status"], "reason": row["reason"],
+            "rule_points": row["rule_points"], "saved_at": row["saved_at"],
+            "signer": signer(row, "signer_"), "signer_function": row["signer_function"] or ""}
 
 
 def triage_feedback(db, key=None):
     if key is not None:
         row = db.execute("SELECT * FROM triage_feedback WHERE case_key=?", (key,)).fetchone()
-        return dict(row) if row else None
-    return [dict(row) for row in db.execute("SELECT * FROM triage_feedback ORDER BY saved_at, case_key")]
+        return _feedback(row) if row else None
+    return [_feedback(row) for row in db.execute("SELECT * FROM triage_feedback ORDER BY saved_at, case_key")]
 
 
 def verdict_counts(db, statuses, since=None):
@@ -241,3 +292,4 @@ def save_briefing_error(db, cache_key, error):
     with db:
         db.execute("""INSERT INTO briefings (cache_key, error) VALUES (?, ?)
             ON CONFLICT(cache_key) DO UPDATE SET error=excluded.error""", (cache_key, error))
+

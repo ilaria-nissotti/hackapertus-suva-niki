@@ -73,3 +73,39 @@ def seed_kb(path, docket, text, decided=None, score=None, band=None):
         kb.save_scores([row | {"score": score, "band": band or row["band"]}])
     kb.close()
     return rec.key
+
+
+# --- review app: tests act as a reviewer who entered their name -----------------------------------
+# The app asks who is reviewing before anything else and signs approvals with that name. App tests act as the
+# fictional "Test Reviewer": every app test client puts it in its session before each request. Modules that
+# test the anonymous start opt out.
+TEST_REVIEWER = {"name": "Test Reviewer", "initials": "TRV", "function": "Rechtsanwalt"}
+ANONYMOUS_MODULES = {"test_review_signature"}
+
+
+def act_as_reviewer(client, reviewer=TEST_REVIEWER):
+    import app as dashboard
+
+    dashboard.ensure_secret_key()
+    with client.session_transaction() as session:
+        session.setdefault("reviewer", dict(reviewer))
+
+
+@pytest.fixture(autouse=True)
+def reviewer_session(request, monkeypatch):
+    import sys
+
+    if request.module.__name__ in ANONYMOUS_MODULES or "app" not in sys.modules:
+        yield
+        return
+    from flask.testing import FlaskClient
+
+    import app as dashboard
+
+    class ReviewerClient(FlaskClient):
+        def open(self, *args, **kwargs):
+            act_as_reviewer(self)
+            return super().open(*args, **kwargs)
+
+    monkeypatch.setattr(dashboard.app, "test_client_class", ReviewerClient)
+    yield
