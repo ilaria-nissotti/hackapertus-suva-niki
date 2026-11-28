@@ -55,3 +55,11 @@ def test_statute_facet_includes_laws_the_judgement_cites_and_topics_have_labels(
     assert body["hits"][0]["statutes"] == ["UVG"]
     assert all(topic["label"] and topic["label"] != topic["value"] for topic in body["facets"]["topic"])
     assert client.get("/api/library", query_string={"statute": "UVG"}).json["total"] == 1
+
+
+def test_every_filter_offers_choices_before_anything_is_approved(client, case):
+    facets = client.get("/api/library").json["facets"]
+    assert {"value": "UVG", "count": 0} in facets["statute"]
+    assert facets["topic"] and all(t["count"] == 0 and t["label"] for t in facets["topic"])
+    assert {"value": "dismissed", "count": 0} in facets["outcome"]
+    assert [f["value"] for f in facets["language"]] == ["de", "fr"]

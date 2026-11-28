@@ -204,18 +204,30 @@ def library_hits(query="", lang=None):
     return hits
 
 
-def library_facets(hits):
-    def count(values, labels=None):
-        return [{"value": v, "count": n} | ({"label": labels[v]} if labels else {})
-                for v, n in sorted(Counter(values).items(), key=lambda i: (-i[1], i[0]))]
-    topics = {t["id"]: t["explanation"] for hit in hits for t in hit["topics"]}  # shown instead of the rule id
-    return {
-        "statute": count(law for hit in hits for law in hit["statutes"]),
-        "topic": count((t["id"] for hit in hits for t in hit["topics"]), topics),
-        "outcome": count(o for hit in hits for o in hit["outcome"]),
-        "language": count(hit["language"] for hit in hits),
-    }
+# Filter choices offered even before any summary carries them, so every filter can be opened: the
+# social-insurance laws Suva works with, the scoring rules that add points, the outcomes the parser derives.
+STATUTE_CATALOG = ("UVG", "UVV", "ATSG", "ATSV", "IVG", "IVV", "AHVG", "KVG", "BVG", "MVG", "ELG", "AVIG", "VVG", "BGG")
+OUTCOME_CATALOG = ("upheld", "partly_upheld", "dismissed", "not_entered", "written_off", "sent_back")
 
+
+def library_facets(hits):
+    """Every filter value with the number of matching approved summaries (0 when none carries it yet)."""
+    from suva.scoring.rules import load_rules
+
+    def count(catalog, values, labels=None):
+        found = Counter(values)
+        order = list(dict.fromkeys([*catalog, *sorted(found)]))
+        return [{"value": v, "count": found[v]} | ({"label": labels[v]} if labels and v in labels else {})
+                for v in sorted(order, key=lambda v: (-found[v], order.index(v)))]
+
+    rules = [r for r in load_rules().rules if (r.weight or r.per_match or 0) > 0]
+    topics = {r.id: r.explanation for r in rules} | {t["id"]: t["explanation"] for hit in hits for t in hit["topics"]}
+    return {
+        "statute": count(STATUTE_CATALOG, (law for hit in hits for law in hit["statutes"])),
+        "topic": count([r.id for r in rules], (t["id"] for hit in hits for t in hit["topics"]), topics),
+        "outcome": count(OUTCOME_CATALOG, (o for hit in hits for o in hit["outcome"])),
+        "language": count(("de", "fr"), (hit["language"] for hit in hits)),
+    }
 
 @app.get("/api/library")
 def library():

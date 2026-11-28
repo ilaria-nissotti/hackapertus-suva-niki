@@ -27,10 +27,9 @@ function FacetSelect({label, name, facets, value, names}: {
   label: string; name: string; facets: Facet[]; value: string; names?: Record<string, string>;
 }) {
   return <div className="facet"><label htmlFor={'library-' + name}>{label}</label>
-    {/* No values yet (no approved summary carries one): say so instead of an empty list. */}
-    <select id={'library-' + name} name={name} defaultValue={value} disabled={!facets.length && !value}
+    <select id={'library-' + name} name={name} defaultValue={value}
       onChange={event => event.currentTarget.form?.requestSubmit()}>
-      <option value="">{facets.length || value ? 'All' : 'None yet'}</option>
+      <option value="">All</option>
       {facets.map(facet => <option key={facet.value} value={facet.value}>
         {(facet.label ?? names?.[facet.value] ?? facet.value) + ` (${facet.count})`}</option>)}
       {value && !facets.some(facet => facet.value === value) && <option value={value}>{names?.[value] ?? value}</option>}
@@ -122,8 +121,9 @@ export function Library({params, link, follow, navigate}: {
     {!data && !error && <p role="status">Loading the library…</p>}
     {data && <>
       <h2>{data.total} approved {data.total === 1 ? 'summary' : 'summaries'}</h2>
-      {!data.hits.length && <p className="empty">No approved summary matches. Approve summaries in the review
-        queue to add them here.</p>}
+      {!data.hits.length && <p className="empty">{search ? 'No approved summary matches these filters.' :
+        'No approved summaries yet. Approve a German or French summary in the review queue and it appears here; ' +
+        'the numbers in the filters count approved summaries.'}</p>}
       <ol className="library-hits">{data.hits.map((hit: LibraryHit) => <li key={hit.key + hit.language}>
         <a href={caseLink(hit)} onClick={follow}>{hit.docket}</a>{' '}
         <span className="muted">{LANGUAGES[hit.language] ?? hit.language} · decided {displayDate(hit.decision_date)}
