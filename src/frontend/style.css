@@ -1,18 +1,17 @@
-/* "Ruling sheet": the queue is a flat register on cool stone paper; the open case is the one raised sheet and reads
-   like the court's ruling. Atkinson Hyperlegible Next for the interface, Literata only for legal prose. Colour is
-   reserved for relevance and for actions. */
+/* A calm reading interface: warm ivory paper, ink-blue text, one pine-green main action, muted ochre for cases
+   worth reviewing. Literata (serif) for judgment titles and legal prose, Atkinson Hyperlegible Next (sans) for
+   controls. One left edge, thin dividers, no cards. Colour always comes with a text label and a shape. */
 :root {
-  --paper: #f3f5f2;
-  --sheet: #ffffff;
-  --ink: #1b2733;
-  --muted: #5a6670;
-  --rule: #d5dbd6;
-  --rule-strong: #b9c2bc;
-  --action: #24527a;
-  --action-hover: #1a3e5e;
-  --relevant: #1f6b4f;
-  --review: #8a5e00;
-  --low: #5f6873;
+  --paper: #faf7f0;
+  --surface: #fffdf8;
+  --ink: #1d2b4a;
+  --muted: #5c6478;
+  --rule: #e6dfd1;
+  --rule-strong: #c9c0ae;
+  --pine: #1f5a44;
+  --pine-hover: #174634;
+  --ochre: #8a6a1f;
+  --low: #6b6f76;
   --alert: #8e2f35;
   --ui: 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif;
   --prose: 'Literata Variable', Georgia, serif;
@@ -24,171 +23,149 @@
 * { box-sizing: border-box }
 body { margin: 0 }
 [hidden] { display: none !important }
-a { color: var(--action); text-underline-offset: .18em; text-decoration-thickness: 1px }
-a:hover { text-decoration-thickness: 2px }
-:focus-visible { outline: 2px solid var(--action); outline-offset: 2px }
+a { color: var(--ink); text-underline-offset: .18em; text-decoration-thickness: 1px; text-decoration-color: var(--rule-strong) }
+a:hover { text-decoration-color: currentColor }
+:focus-visible { outline: 2px solid var(--pine); outline-offset: 2px }
 button, input, select, textarea { font: inherit; min-width: 0; color: var(--ink) }
-button, input, select, textarea {
-  border: 1px solid var(--rule-strong); border-radius: 4px; padding: .5rem .75rem; background: var(--sheet);
-}
+button, input, select, textarea { border: 1px solid var(--rule-strong); border-radius: 4px; padding: .5rem .8rem; background: var(--surface) }
 input:hover, select:hover, textarea:hover { border-color: var(--muted) }
 button { cursor: pointer; font-weight: 650 }
 button:hover:not(:disabled) { border-color: var(--ink) }
-button:disabled { opacity: .55; cursor: default }
-button.primary { background: var(--action); color: white; border-color: var(--action) }
-button.primary:hover:not(:disabled) { background: var(--action-hover); border-color: var(--action-hover) }
+button:disabled { opacity: .6; cursor: default }
+button.primary { background: var(--pine); color: #fff; border-color: var(--pine); padding-inline: 1.1rem }
+button.primary:hover:not(:disabled) { background: var(--pine-hover); border-color: var(--pine-hover) }
 h1, h2, h3, h4, p, dl { margin: 0 }
 h1, h2, h3, h4 { color: var(--ink); line-height: 1.25 }
-h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em }
-h2 { font-size: 1.25rem; font-weight: 700 }
-h3 { font-size: 1.05rem; font-weight: 700 }
+h1 { font-size: 1.45rem; font-weight: 700 }
+h2 { font-size: 1.2rem; font-weight: 700 }
+h3 { font-size: 1rem; font-weight: 700 }
 h4 { font-size: .95rem; font-weight: 650; margin-top: .9rem }
-code { font-size: .9em; background: #e6eae6; border-radius: 3px; padding: .05em .3em }
+code { font-size: .9em; background: #efe9dc; border-radius: 3px; padding: .05em .3em }
 .muted, footer { color: var(--muted); font-size: .875rem }
 
-/* Masthead: a quiet line, not a coloured bar. */
+/* Page frame: one column, one left edge. */
 .masthead { border-bottom: 1px solid var(--rule) }
-.topbar, main { width: min(100% - 3rem, 90rem); margin-inline: auto }
-.topbar, .headline, .case-identity { display: flex; align-items: center; justify-content: space-between; gap: 1rem }
-.topbar { min-height: 3.5rem }
-.brand { display: inline-flex; align-items: center; gap: .6rem; color: var(--ink); text-decoration: none; font-weight: 700 }
-.brand span { font: 600 1.15rem var(--prose); color: var(--action) }
+.topbar, main { width: min(100% - 3rem, 76rem); margin-inline: auto }
+.topbar, .headline { display: flex; align-items: center; justify-content: space-between; gap: 1rem }
+.topbar { min-height: 3.4rem }
+.brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--ink); text-decoration: none; font-weight: 700 }
+.brand span { font: 600 1.15rem var(--prose); color: var(--pine) }
 .challenge { color: var(--muted); font-size: .875rem }
 .challenge span { margin-inline: .35rem }
-main { padding-block: 1.5rem }
+main { padding-block: 1.75rem 2rem }
 
-/* Headline and window summary: plain figures on the paper. */
-.headline { margin-bottom: .9rem; flex-wrap: wrap }
-.coverage { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 2.5rem; margin-bottom: 1.25rem }
+/* List screen. */
+.headline { margin-bottom: .75rem; flex-wrap: wrap }
+.coverage { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 2.5rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem }
 .metrics { display: flex; gap: 2rem }
 .metrics div { display: flex; flex-direction: column-reverse }
 .metrics dt { color: var(--muted); font-size: .875rem }
-.metrics dd { margin: 0; font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1 }
-.coverage-dates { display: grid; font-size: .95rem; max-width: 70ch }
+.metrics dd { margin: 0; font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1 }
+.coverage-dates { display: grid; font-size: .95rem; max-width: 68ch }
 .coverage-dates small { color: var(--muted); font-size: .875rem }
-.notice { margin-bottom: 1rem; padding: .75rem 1rem; background: var(--sheet); border-left: 3px solid var(--action) }
-.notice.warning { background: #f7efd9; border-left-color: var(--review); color: #3e2c00 }
-
-/* Workspace: register on the left, the open case (or an empty slot for it) on the right. */
-.workspace { display: grid; gap: 1.5rem; align-items: start }
-.panel { min-width: 0 }
-.case-placeholder { display: none; padding: 1.5rem; color: var(--muted); border: 1px dashed var(--rule-strong); border-radius: 6px }
-.case-placeholder h2 { color: var(--muted); margin-bottom: .35rem }
-.case-placeholder p { max-width: 52ch }
-@media (min-width: 861px) {
-  /* One stable layout: the queue on the left, the open case (or a prompt) on the right. */
-  .workspace { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr) }
-  .case-placeholder { display: block }
-  .workspace > .case .back { display: none } /* the queue is right there */
-  /* Keep the open case in view while the reviewer scrolls the queue beside it. */
-  .workspace > .panel:not(.queue) { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain }
-}
-
-/* The register. */
-.queue { border-top: 2px solid var(--ink) }
-.queue-header { padding: .9rem 0 1rem }
+.notice { margin-bottom: 1.25rem; padding: .75rem 1rem; background: var(--surface); border-left: 3px solid var(--pine) }
+.notice.warning { background: #f6ecd2; border-left-color: var(--ochre); color: #3d2e08 }
+.queue-header { padding-bottom: 1rem }
 .queue-header h2 small { color: var(--muted); font-size: .875rem; font-weight: 650; margin-left: .35rem; font-variant-numeric: tabular-nums }
-.filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem }
-.filters input { flex: 1 1 100% }
-.filters select { flex: 1 1 auto }
+.filters { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: .5rem; margin-top: .75rem }
 .table-wrap { overflow-x: auto }
 table { width: 100%; border-collapse: collapse; text-align: left }
-th, td { padding: .7rem .6rem; border-top: 1px solid var(--rule); vertical-align: top }
-th:first-child, td:first-child { padding-left: .75rem }
-th { color: var(--muted); font-size: .8125rem; font-weight: 650; border-top: 0; padding-block: .4rem }
+th, td { padding: .8rem 1rem .8rem 0; border-top: 1px solid var(--rule); vertical-align: top }
+th { color: var(--muted); font-size: .8125rem; font-weight: 650; padding-block: .45rem; border-top: 0 }
+th:nth-child(2), td:nth-child(2) { width: 9rem; white-space: nowrap; font-variant-numeric: tabular-nums }
+th:nth-child(3), td:nth-child(3) { width: 11rem; padding-right: 0 }
 td { font-size: .9375rem }
-td a { font-weight: 700; white-space: nowrap; color: var(--ink); text-decoration-color: var(--rule-strong); font-variant-numeric: tabular-nums }
-td a:hover { color: var(--action); text-decoration-color: currentColor }
-td:nth-child(2) { white-space: nowrap; color: var(--muted) }
-tbody tr:hover { background: #eef1ed }
-tr.selected, tr.selected:hover { background: var(--sheet); box-shadow: inset 3px 0 0 var(--action) }
+td:nth-child(2) { color: var(--muted) }
+td a { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums }
+tbody tr:hover { background: #f4efe3 }
 .topic {
-  color: var(--muted); margin-top: .15rem; overflow-wrap: anywhere; font-size: .875rem;
+  margin-top: .2rem; max-width: 62ch; font: 1rem/1.45 var(--prose); overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }
-.score { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right }
-th:nth-child(3) { text-align: right }
+.pagination, .actions { display: flex; flex-wrap: wrap; gap: .65rem 1rem; align-items: center }
+.pagination { border-top: 1px solid var(--rule); padding-block: 1rem }
+.empty { padding: 1rem 0; color: var(--muted) }
 
-/* Relevance: a word plus a shape, so the colour is never the only signal. */
-.status { display: inline-flex; align-items: center; gap: .4rem; font-size: .8125rem; font-weight: 700; white-space: nowrap; color: var(--low) }
-.status::before { content: ''; width: .6rem; height: .6rem; border-radius: 50%; border: 2px solid currentColor; flex: none }
-.status.relevant { color: var(--relevant) }
+/* Status: a plain-language word plus a shape, never colour alone. */
+.status { display: inline-flex; align-items: center; gap: .45rem; font-size: .875rem; font-weight: 650; white-space: nowrap; color: var(--low) }
+.status::before { content: ''; width: .62rem; height: .62rem; border-radius: 50%; border: 2px solid currentColor; flex: none }
+.status.relevant { color: var(--pine) }
 .status.relevant::before { background: currentColor }
-.status.review, .status.queued { color: var(--review) }
+.status.review, .status.queued { color: var(--ochre) }
 .status.review::before, .status.queued::before { background: linear-gradient(90deg, currentColor 50%, transparent 50%) }
 .status.stale, .status.retry { color: var(--alert) }
 .status.stale::before, .status.retry::before { border-style: dashed }
-.pagination, .actions { display: flex; flex-wrap: wrap; gap: .65rem 1rem; align-items: center }
-.pagination { justify-content: center; border-top: 1px solid var(--rule); padding: .9rem }
-.empty { padding: 1rem .75rem; color: var(--muted) }
 
-/* The open case: the one raised sheet. */
-.case, .panel.empty {
-  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
-  box-shadow: 0 1px 0 #1b27330a, 0 18px 40px -28px #1b273366;
-}
-.case-header, .case-body { padding: 1.4rem 1.6rem }
+/* Case screen. */
+.back { display: inline-block; margin-bottom: 1rem; font-size: .9375rem }
 .case-header { padding-bottom: 1.1rem }
-.back { display: inline-block; margin-bottom: .9rem; font-size: .875rem }
-.case-identity h2 { font-size: 1.05rem; font-variant-numeric: tabular-nums; letter-spacing: .01em }
-.case-score { display: flex; align-items: baseline; gap: .9rem }
-.case-score strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; white-space: nowrap }
-.case-score small { color: var(--muted); font-size: .875rem; font-weight: 400 }
-.case-name { margin-top: .6rem; font: 500 1.6rem/1.3 var(--prose); letter-spacing: -.005em; max-width: 46ch; text-wrap: pretty }
-.metadata { display: flex; flex-wrap: wrap; gap: .5rem 2rem; margin-top: 1rem }
+.case-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 1.5rem }
+.case-name { font: 500 1.75rem/1.28 var(--prose); letter-spacing: -.005em; max-width: 48ch; text-wrap: pretty }
+.metadata { display: flex; flex-wrap: wrap; gap: .4rem 2rem; margin-top: .8rem }
 .metadata div { display: flex; gap: .4rem; align-items: baseline }
 .metadata dt { color: var(--muted); font-size: .875rem }
-.metadata dd { margin: 0; font-size: .9375rem }
-.case-nav { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; border-block: 1px solid var(--rule); padding-inline: 1.6rem }
-.case-nav button { border: 0; border-bottom: 2px solid transparent; background: transparent; border-radius: 0; padding: .7rem 0; font-size: .9375rem; color: var(--muted) }
-.case-nav button:hover:not(:disabled) { color: var(--ink) }
-.case-nav button[aria-pressed=true] { border-bottom-color: var(--ink); color: var(--ink) }
-.case-body section + section { margin-top: 1.6rem; padding-top: 1.3rem; border-top: 1px solid var(--rule) }
-.case-body section > * + *, dialog form > * + * { margin-top: .75rem }
-.reasons { list-style: none; padding: 0; margin: .4rem 0 }
-.reasons li { display: grid; grid-template-columns: 2.75rem 1fr; margin: .35rem 0 }
-.reasons .points { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right; padding-right: .9rem }
-details { border-top: 1px solid var(--rule); padding-top: .6rem }
-summary { cursor: pointer; font-weight: 650; color: var(--action) }
-.source, blockquote { overflow-wrap: anywhere }
-.source { margin-top: .9rem; white-space: pre-wrap; font: 1rem/1.7 var(--prose) }
-blockquote { margin: .8rem 0 0; padding: .1rem 0 .1rem 1rem; border-left: 2px solid var(--rule-strong); font: italic 1rem/1.65 var(--prose); white-space: pre-wrap }
-
-/* Ruling text: the court's paragraph numbers sit in the margin. */
-.ruling { white-space: normal; max-width: 74ch }
-.ruling p { display: grid; grid-template-columns: 3rem minmax(0, 1fr); white-space: pre-wrap }
-.ruling p + p { margin-top: .75rem }
-.paragraph-number { font: 700 .8125rem/2.1 var(--ui); color: var(--muted); font-variant-numeric: tabular-nums }
-
+.metadata dd { margin: 0; font-size: .9375rem; font-variant-numeric: tabular-nums }
+.case-toolbar {
+  position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  min-height: 3.6rem; background: var(--paper); border-block: 1px solid var(--rule);
+}
+.primary-action { display: flex; align-items: center; min-height: 2.6rem }
 .segmented { display: flex; gap: .25rem; flex-wrap: wrap }
 .segmented button { font-size: .875rem; padding: .35rem .75rem }
-.segmented button[aria-pressed=true] { color: white; background: var(--ink); border-color: var(--ink) }
-.languages { margin-bottom: 1.1rem }
-label { display: grid; gap: .4rem; font-weight: 650 }
+.segmented button[aria-pressed=true] { color: #fff; background: var(--ink); border-color: var(--ink) }
+/* Language tabs: underlined, in the same place on every case. */
+.languages { gap: 1.25rem; align-self: stretch }
+.languages button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 0; font-size: .9375rem; color: var(--muted) }
+.languages button:hover:not(:disabled) { color: var(--ink); border-color: transparent; border-bottom-color: var(--rule-strong) }
+.languages button[aria-pressed=true] { color: var(--ink); background: transparent; border-bottom-color: var(--ink) }
+.case-grid { display: grid; gap: 1.25rem 3rem; padding-block: 1.5rem; border-bottom: 1px solid var(--rule) }
+.case-grid > * > * + *, .briefing > * + *, .case-more > * + *, dialog form > * + * { margin-top: .75rem }
+@media (min-width: 900px) {
+  .case-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) }
+  .case-grid.summary-grid { grid-template-columns: minmax(0, 68ch) minmax(16rem, 1fr) }
+}
+.reasons { list-style: none; padding: 0; margin: .4rem 0 }
+.reasons li { display: grid; grid-template-columns: 2.6rem 1fr; margin: .3rem 0 }
+.reasons .points { font-variant-numeric: tabular-nums; font-weight: 700 }
+.briefing { padding-block: 1.5rem; border-bottom: 1px solid var(--rule) }
+.case-more { padding-block: .9rem; border-bottom: 1px solid var(--rule) }
+.case-more > summary { font-weight: 700 }
+details > summary { cursor: pointer; font-weight: 650 }
+details details { margin-top: .6rem }
+.source, blockquote { overflow-wrap: anywhere }
+.source { white-space: pre-wrap; font: 1rem/1.7 var(--prose) }
+blockquote { margin: .75rem 0 0; padding: .05rem 0 .05rem .9rem; border-left: 2px solid var(--rule-strong); font: 1rem/1.6 var(--prose); white-space: pre-wrap }
+aside blockquote:first-of-type { margin-top: .6rem }
+
+/* Ruling text: the court's paragraph numbers sit in the margin. */
+.ruling { white-space: normal; max-width: 72ch }
+.ruling p { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); white-space: pre-wrap }
+.ruling p + p { margin-top: .6rem }
+.paragraph-number { font: 700 .8125rem/2.1 var(--ui); color: var(--muted); font-variant-numeric: tabular-nums }
+
+label { display: grid; gap: .45rem; font-weight: 650 }
 label + label, form .actions, label + button { margin-top: .75rem }
-textarea { resize: vertical; width: 100%; font: 400 1rem/1.65 var(--prose); padding: .75rem .9rem }
-audio { width: 100%; display: block }
+textarea { resize: vertical; width: 100%; font: 400 1.02rem/1.7 var(--prose); padding: .8rem .95rem }
+audio { width: 100%; max-width: 36rem; display: block }
 .chat-turns { padding: 0; list-style: none }
 .chat-turns li { border-top: 1px solid var(--rule); padding: .8rem 0; white-space: pre-wrap; overflow-wrap: anywhere }
 .chat-turns li > * + * { margin-top: .45rem; margin-right: .3rem }
-dialog { color: var(--ink); background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; width: min(32rem, 100% - 2rem); padding: 1.5rem }
-dialog::backdrop { background: #1b273399 }
-footer { margin-top: 1.5rem }
-@media (max-width: 860px) {
-  .workspace.has-case { grid-template-columns: minmax(0, 1fr) }
-  .has-case .queue { display: none }
+dialog { color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; width: min(32rem, 100% - 2rem); padding: 1.5rem }
+dialog::backdrop { background: #1d2b4a8c }
+footer { margin-top: 2rem }
+@media (max-width: 720px) {
+  .filters { grid-template-columns: 1fr 1fr }
+  .filters input { grid-column: 1 / -1 }
+  th:nth-child(2), td:nth-child(2) { width: auto; white-space: normal }
+  .case-heading { flex-direction: column; gap: .5rem }
 }
 @media (max-width: 520px) {
   .topbar, main { width: calc(100% - 1.5rem) }
   .metrics { gap: 1.25rem }
-  th, td { padding-inline: .45rem }
-  td:nth-child(2) { white-space: normal }
-  .case-header, .case-body { padding-inline: 1rem }
-  .case-nav { padding-inline: 1rem }
   .challenge { text-align: right }
 }
 
-/* Case call: one dark portrait, one action button. */
+/* Case call: one portrait, one action. */
 .call-stage {
   display: grid;
   justify-items: center;
@@ -196,7 +173,8 @@ footer { margin-top: 1.5rem }
   padding: 1.5rem 1rem;
   margin-top: 1rem;
   text-align: center;
-  background: var(--paper);
+  background: var(--surface);
+  border: 1px solid var(--rule);
   border-radius: 6px;
 }
 .call-portrait {
@@ -207,9 +185,9 @@ footer { margin-top: 1.5rem }
   aspect-ratio: 1;
   border-radius: 50%;
   overflow: hidden;
-  color: #e6ebe7;
+  color: #f4efe3;
   background: var(--ink);
-  border: 3px solid var(--sheet);
+  border: 3px solid var(--surface);
   box-shadow: 0 0 0 1px var(--rule-strong);
   font: 2.6rem var(--prose);
 }
@@ -219,23 +197,23 @@ button.call-button {
   width: 5.6rem;
   aspect-ratio: 1;
   border-radius: 50%;
-  color: white;
-  background: var(--relevant);
-  border: 1px solid var(--relevant);
+  color: #fff;
+  background: var(--pine);
+  border: 1px solid var(--pine);
   font-size: .875rem;
   line-height: 1.2;
 }
-button.call-button:hover:not(:disabled) { background: #164f3a; border-color: #164f3a }
+button.call-button:hover:not(:disabled) { background: var(--pine-hover); border-color: var(--pine-hover) }
 [data-chat-recording] button.call-button { background: var(--alert); border-color: var(--alert) }
 [data-chat-recording] button.call-button:hover:not(:disabled) { background: #6f2329 }
 [data-chat-playing] .call-portrait { animation: speaking 1.2s ease-in-out infinite alternate }
 @keyframes speaking {
-  to { box-shadow: 0 0 0 .4rem #9cc7b2; }
+  to { box-shadow: 0 0 0 .4rem #9cc1ad; }
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-chat-playing] .call-portrait { animation: none; box-shadow: 0 0 0 .3rem #9cc7b2; }
+  [data-chat-playing] .call-portrait { animation: none; box-shadow: 0 0 0 .3rem #9cc1ad; }
 }
 
 .save-feedback { margin-top: .5rem }
-.save-feedback[role="status"] { color: var(--relevant) }
+.save-feedback[role="status"] { color: var(--pine) }
 .save-feedback[role="alert"] { color: var(--alert) }

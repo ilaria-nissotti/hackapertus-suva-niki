@@ -41,6 +41,14 @@ function RulingText({text, lang}: {text: string; lang?: string}) {
     <p key={i}><span className="paragraph-number">{block.number}</span>{block.text}</p>)}</div>;
 }
 
+/** The operative part without the signature block, which starts at the place-and-date line
+    ("Luzern, 6. August 2026", "Lucerne, le 6 août 2026", "Bellinzona, 3 settembre 2026"). Display only. */
+function decisionWithoutSignatures(text: string) {
+  const parts = text.split(/\n{2,}/);
+  const end = parts.findIndex((part, i) => i > 0 && /^\p{Lu}[\p{L} .'-]*, (le |il )?\d{1,2}\.? \p{L}+ \d{4}\.?\s*$/u.test(part.trim()));
+  return end > 0 ? parts.slice(0, end).join('\n\n') : text;
+}
+
 function WhyInQueue({record}: {record: Judgment}) {
   const reasons = (sign: 1 | -1) => record.fired.filter(rule => Math.sign(rule.points) === sign);
   const list = (rules: FiredRule[]) => <ul className="reasons">{rules.map(rule =>
@@ -117,7 +125,7 @@ function LanguageWorkspace({record, lang, audio, action, busy, selectLanguage}: 
       </section>
       <section aria-labelledby="decision-title">
         <h3 id="decision-title">What the court decided</h3>
-        {record.decision ? <RulingText text={record.decision} lang={record.language ?? undefined}/>
+        {record.decision ? <RulingText text={decisionWithoutSignatures(record.decision)} lang={record.language ?? undefined}/>
           : <p className="muted">The operative part wasn’t found in this judgment. Read the full judgment below.</p>}
       </section>
     </div>
