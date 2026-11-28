@@ -51,7 +51,6 @@ def feature_response(response):
     return response
 
 
-@pending
 def test_eval_keeps_all_held_out_references_out_of_model_requests(settings, monkeypatch, capsys):
     decided = date(2025, 10, 2)
     held_out = {

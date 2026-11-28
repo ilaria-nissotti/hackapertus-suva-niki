@@ -142,6 +142,31 @@ def cmd_score(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval_summaries(args: argparse.Namespace) -> int:
+    from suva.summary_eval import evaluate, format_report
+
+    settings = load_settings()
+    if not settings.llm_name or not settings.llm_base_url:
+        print("Configure LLM_NAME and LLM_BASE_URL (see .env.example)", file=sys.stderr)
+        return 2
+    # The replay cache applies (LLM_CACHE_MODE), so a frozen run can be repeated offline.
+    config = {"LLM_NAME": settings.llm_name, "LLM_BASE_URL": settings.llm_base_url.rstrip("/"), "settings": settings}
+    split = {"evaluation": "eval", "fewshot": "fewshot"}[args.split]
+    with closing(open_repository(settings)) as repo:
+        report = evaluate(repo, config, split, args.limit)
+    out = settings.data_dir / "scoring"
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"summary-eval-{args.split}.json"
+    path.write_text(json.dumps(report.as_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(format_report(report))
+    print(f"written: {path}")
+    if not report.cases:
+        print("note: no examples with judgement text in this split (run import-supplied, split-examples, fetch)",
+              file=sys.stderr)
+        return 1
+    return 1 if report.failures else 0
+
+
 def _scoring_dir() -> Path:
     return load_settings().data_dir / "scoring"
 
@@ -588,6 +613,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--top-n", type=int, help="override selection.top_n (scaled to each fold)")
     p.add_argument("--per", choices=["month", "week", "period"], help="override selection.per")
     p.set_defaults(func=cmd_cv)
+
+    p = sub.add_parser("eval-summaries", help="draft held-out judgements and compare with Suva's summaries")
+    p.add_argument("--split", choices=["evaluation", "fewshot"], default="evaluation",
+                   help="evaluation = the held-out split (never shown to prompts); fewshot only as a sanity check")
+    p.add_argument("--limit", type=int, help="evaluate at most N examples")
+    p.set_defaults(func=cmd_eval_summaries)
 
     p = sub.add_parser("llm-ping", help="one live call to check the Apertus endpoint")
     p.add_argument("--prompt", default="Antworte mit genau einem Wort: Bereit?")
