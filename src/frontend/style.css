@@ -107,6 +107,9 @@ td { font-size: .9375rem }
 td a { font-weight: 700; white-space: nowrap; color: var(--ink); text-decoration-color: var(--rule-strong); font-variant-numeric: tabular-nums }
 td a:hover { color: var(--action); text-decoration-color: currentColor }
 td:nth-child(2) { white-space: nowrap; color: var(--muted) }
+.queue tbody tr { position: relative }
+.queue-link::after { content: ''; position: absolute; inset: 0 }
+.queue-link:focus-visible::after { outline: 2px solid var(--action); outline-offset: -2px }
 tbody tr:hover { background: #f0eae0 }
 tr.selected, tr.selected:hover { background: var(--sheet); box-shadow: inset 3px 0 0 var(--action) }
 .topic {

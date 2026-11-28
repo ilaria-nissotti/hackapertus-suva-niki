@@ -206,9 +206,9 @@ function App() {
           <div className="table-wrap"><table>
             <thead><tr><th scope="col">Judgment</th><th scope="col">Published</th><th scope="col">Status</th></tr></thead>
             <tbody>{dashboard.rows.map(row => <tr key={row.key} className={row.key === caseKey ? 'selected' : ''}>
-              <td><a href={link({case: row.key, view: null})} onClick={follow}
-                aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
-                {row.title !== row.docket ? <div className="topic" title={row.issue ?? undefined}>{judgmentSubject(row.title)}</div>
+              <td><a className="queue-link" href={link({case: row.key, view: null})} onClick={follow}
+                title={row.issue ?? undefined} aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
+                {row.title !== row.docket ? <div className="topic">{judgmentSubject(row.title)}</div>
                   : row.issue && <div className="topic">{row.issue}</div>}</td>
               <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td>
               <td><Status value={row.status}/></td>

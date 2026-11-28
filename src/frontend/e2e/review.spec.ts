@@ -51,6 +51,15 @@ test.describe('accessibility (axe, WCAG 2.1 A/AA)', () => {
   });
 });
 
+test('the publication cell opens its judgment without clicking the docket', async ({page}) => {
+  await open(page, '/');
+  const row = page.getByRole('row').filter({has: page.getByRole('link', {name: '8C_901/2026'})});
+  const cell = (await row.getByRole('cell', {name: 'Unknown', exact: true}).boundingBox())!;
+  await page.mouse.click(cell.x + cell.width / 2, cell.y + cell.height / 2);
+  await expect(page).toHaveURL(/case=8C_901/);
+  await expect(page.getByRole('heading', {name: SUBJECT})).toBeVisible();
+});
+
 test.describe('keyboard', () => {
   test('a case opens from the keyboard', async ({page}) => {
     await open(page, '/');
