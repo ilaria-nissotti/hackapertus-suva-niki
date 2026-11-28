@@ -19,6 +19,7 @@ from typing import Any
 
 from suva.hashing import sha256
 from suva.scoring.dataset import features_record
+from suva.scoring.derive import with_derived_fields
 from suva.scoring.rules import RuleSet
 from suva.scoring.score import ScoreResult, score_record
 from suva.scoring.select import select_scored
@@ -41,12 +42,18 @@ class ScoreRunReport:
         return asdict(self)
 
 
+# Bump when the scorer computes different points from the same rules, so stored scores show as stale.
+# 2: derived fields (appellant, outcome, reasoning_pages) are added before scoring.
+SCORER_VERSION = 2
+
+
 def rules_hash(ruleset: RuleSet) -> str:
     """Hash of everything that changes a stored score or band (comments and evidence notes in rules.yaml don't)."""
     selection = ruleset.selection
     return sha256(repr(([(r.id, r.field, r.weight, r.any, r.all, r.regex, r.none, r.min, r.case_sensitive,
                           r.per_match, r.max, r.explanation) for r in ruleset.rules],
-                        ruleset.base, (selection.top_n, selection.floor_rule_points, selection.per))))
+                        ruleset.base, (selection.top_n, selection.floor_rule_points, selection.per),
+                        SCORER_VERSION)))
 
 
 def inputs_hash(language, parsed_at):
@@ -90,7 +97,8 @@ def _score_rows(repo: Repository, judgements: list[dict[str, Any]], ruleset: Rul
                 window: Window | None) -> ScoreRunReport:
     rep = ScoreRunReport(str(window) if window else "selected judgements",
                          str(ruleset.path or "<inline>"), rules_hash(ruleset))
-    records = [features_record(repo, row) for row in judgements]
+    # The significance rules look at appellant, outcome and reasoning_pages, derived like in the dataset.
+    records = [with_derived_fields(features_record(repo, row)) for row in judgements]
     scored = [(record, score_record(record, ruleset)) for record in records]
     band_of = _bands(scored, ruleset, whole_period=window is not None)
     bands, rows = Counter(), []
