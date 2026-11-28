@@ -20,6 +20,9 @@
   font-variant-numeric: lining-nums;
 }
 * { box-sizing: border-box }
+/* Reserve the scrollbar's space on every screen: the long queue has a scrollbar and Find precedents or the
+   Library may not, and without this the whole layout shifts sideways when switching between them. */
+html { scrollbar-gutter: stable }
 body { margin: 0 }
 [hidden] { display: none !important }
 a { color: var(--action); text-underline-offset: .18em; text-decoration-thickness: 1px }
