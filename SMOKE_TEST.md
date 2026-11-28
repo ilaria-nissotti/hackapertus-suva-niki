@@ -25,6 +25,7 @@ Copy `.env.example` to `.env` and fill it in. Variables already set in the shell
 | `LLM_API_KEY` | the Apertus gateway | used by `python -m suva llm-ping` |
 | `DATABASE_URL` | knowledge base (default `sqlite:///data/kb.sqlite`) | **required**: the file must exist |
 | `DATA_DIR` | review DB, caches, scoring output (default `data`) | |
+| `SUVA_SECRET_KEY` | optional Flask reviewer session signing key | if unset, the app creates a random key in `DATA_DIR/session-secret` (default `data/session-secret`, owner read/write only) and reuses it on restart |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID_DE`, `ELEVENLABS_VOICE_ID_FR` | audio briefings and voice questions | optional: a warning per missing language |
 | `LOG_LEVEL` | log verbosity (default `INFO`) | |
 
@@ -131,6 +132,24 @@ Here `$KB` is the knowledge-base file, `data/kb.sqlite` by default.
 3. Open **Ask this judgment**, start a case call and ask "Wie hat das Bundesgericht entschieden?".
 4. Check: the answer is spoken and cites original lines. Nothing is stored server-side, and the log contains no
    question text.
+
+### Flow 6: calculate, discard and accept rule weights
+
+Run this flow in a disposable checkout with a scratch knowledge base containing parsed Suva training judgments and
+scored judgments in the current window. From that checkout, run `python -m suva dataset` with the same `DATA_DIR`
+and `DATABASE_URL` as the server. Acceptance writes to the checkout’s `rules/rules.yaml`.
+
+1. In a judgment’s **Overview → Your assessment**, choose **Relevant** or **Not relevant** and select
+   **Save assessment**. Open **Rule weights** and check that **Your verdicts** includes the saved verdict.
+2. Run `shasum -a 256 rules/rules.yaml` and record the checksum. Select **Calculate new weights** and wait for
+   **Proposed weights**. Check the verdict agreement, past-pick recall, shortlist comparison, per-rule points and
+   proposed minimum points. Recheck the checksum to confirm calculation left the file unchanged.
+3. Select **Discard**. Check that the proposal closes, the checksum stays the same, and **Previous updates**
+   has no new entry.
+4. Calculate again. Use a proposal with at least one changed weight, base or floor. Select **Accept new weights**.
+   Check that **Previous updates** gains an entry and `git diff -- rules/rules.yaml` shows the proposed values.
+5. Wait for **Queue rescored with the new weights (N judgments).** with a positive count. Check the server log
+   for `rescored judgements=…`. Reload the queue and verify the rescored cases no longer show **Stale**.
 
 ## 4. Deliberate failure checks
 

@@ -86,7 +86,7 @@ flowchart TB
 
 ---
 
-## 3. The five most important flows
+## 3. The most important flows
 
 ### Flow 1: load Suva's examples (`import-supplied`, then `split-examples`)
 
@@ -156,6 +156,8 @@ sequenceDiagram
     participant KB as 🗄️ kb.sqlite (review_kb.py)
     participant RV as 🗃️ review.sqlite
     participant AI as 🤖 Apertus (bger.chat → llm.LLMClient)
+    R->>UI: enter name, initials and optional function
+    UI->>APP: POST /api/session → signed reviewer cookie
     R->>UI: open the queue
     UI->>APP: GET /api/dashboard, re-polled every 8 s while a job runs
     APP->>KB: window_records, get_record
@@ -170,9 +172,13 @@ sequenceDiagram
     APP->>RV: results rows (facts, de, fr)
     R->>UI: edit + Approve
     UI->>APP: POST /approve, version must match the draft, else 409
-    APP->>RV: results.approved = edited text
+    APP->>RV: save approved text, reviewer signature and library entry in one transaction
 ```
 
+- **Reviewer session:** Flask keeps the reviewer identity in a signed cookie with a 12-hour lifetime. Review APIs
+  require an active session. **Change** clears it so another reviewer can enter their details.
+- **Approval signature:** `review_store.approve` records the reviewer’s name, initials and optional function with the
+  case, language and draft version in `review.sqlite`. Older approvals can be unsigned.
 - **Background jobs:** `process()` holds a per-draft file lock (`data/summary-locks/`). The web server and
   `summarize-top` therefore never pay for the same Apertus call twice.
 - **Failures:** a failed draft stores a short error. The UI shows it, and the next click retries.
@@ -196,6 +202,17 @@ flowchart LR
 - **Conversations:** the history lives only in the browser tab (6 turns). The server stores nothing, and logs never
   contain the question.
 
+### Flow 6: retrain rule weights from reviewer verdicts
+
+1. Save a relevance verdict in **Overview → Your assessment**. After 30 new verdicts, the queue suggests an update.
+2. In **Rule weights**, select **Calculate new weights**. A background job combines Suva’s training picks with reviewer
+   verdicts. A verdict takes precedence on conflicts, and held-out test dockets stay out of training.
+3. The proposal in `review.sqlite` compares verdict agreement, recall of Suva’s past picks and changes to the current
+   shortlist. **Discard** closes the proposal and keeps the current rules.
+4. **Accept new weights** checks that the rules file still matches the proposal, then atomically updates the weights,
+   display base and selection floor in `rules/rules.yaml`. A background job rescores the current window and hand-added
+   cases outside it. The screen reports the rescore result.
+
 ---
 
 ## 4. Where state, database calls and external APIs live
@@ -215,6 +232,7 @@ erDiagram
     KB_SQLITE ||--o| example_split_manifest : holds
     KB_SQLITE ||--o{ audit_log : "append-only"
     REVIEW_SQLITE ||--o{ results : "drafts + approvals"
+    REVIEW_SQLITE ||--o{ signatures : "reviewer approval history"
     REVIEW_SQLITE ||--o{ briefings : "scripts + MP3"
     REVIEW_SQLITE ||--o{ review_cases : "hand-added"
     LLM_CACHE_SQLITE ||--o{ llm_cache : "replayed answers"
@@ -246,6 +264,8 @@ erDiagram
 
 ### Runtime state and logs
 
+- **Session signing:** The optional `SUVA_SECRET_KEY` sets the Flask cookie signing key. If unset, the app creates a
+  random key in `DATA_DIR/session-secret` (default `data/session-secret`, owner read/write only) and reuses it on restart.
 - **Browser:** React (`main.tsx`) keeps the view in the URL (`case`, `lang`, `view`, `q`, `status`, `sort`,
   `page`). The voice chat (`conversation-controller.mjs`) is plain JavaScript with its own in-memory turns.
 - **Server:** the summary and briefing jobs run in one background thread (`pool`, `max_workers=1`). The `pending`
