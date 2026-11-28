@@ -90,8 +90,6 @@ def get_record(repo, key, rules_digest=None):
         return None
     result = record(rows[0], rules_digest or current_rules_hash())
     result["source_url"] = next((s["url"] for s in repo.judgement_sources(key) if s["url"]), None)
-    # What the court decided: the parser's verbatim operative part ("Demnach erkennt …"), if it found one.
-    result["decision"] = next((p["text"] for p in repo.list_passages(key) if p["kind"] == "dispositiv"), None)
     return result
 
 

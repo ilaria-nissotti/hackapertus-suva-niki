@@ -7,7 +7,6 @@ export type QueueRow = {
 export type FiredRule = {id: string; points: number; explanation: string};
 export type Judgment = Omit<QueueRow, 'issue'> & {
   date_source: string | null; source_url: string | null; full_text: string; language: string | null;
-  decision: string | null;
   band: 'high' | 'check' | 'low' | null; fired: FiredRule[]; score_current: boolean;
   de: Result<{summary: string; quotes: string[]}>;
   fr: Result<{summary: string; quotes: string[]}>;
