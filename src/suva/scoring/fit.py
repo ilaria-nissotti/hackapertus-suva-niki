@@ -80,7 +80,8 @@ def fit_weights(records: list[dict[str, Any]], ruleset: RuleSet, l2: float = 1.0
     weights = {feature_id: int(round(c * POINTS_PER_LOGIT)) for feature_id, c in zip(ids, w)}
     base = int(round(b * POINTS_PER_LOGIT))
     # the floor is chosen on the rule points the rounded weights actually give (graded caps included, no base)
-    points = [score_record(rec, apply_weights(ruleset, weights, base)).rule_points for rec in records]
+    weighted = apply_weights(ruleset, weights, base)  # once, not per record: it recompiles every rule's patterns
+    points = [score_record(rec, weighted).rule_points for rec in records]
     return FittedWeights(
         weights=weights,
         current={r.id: (r.per_match if r.graded else r.weight) for r in ruleset.rules},
