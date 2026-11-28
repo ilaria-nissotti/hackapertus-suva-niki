@@ -41,8 +41,12 @@ def judgement_text(docket: str, decided: date, subject: str) -> str:
             "A.________,\n\ngegen\n\nSuva, Fluhmattstrasse 1, 6002 Luzern,\n\n"
             f"Gegenstand\n\n{subject}, Beschwerde gegen das Urteil des Versicherungsgerichts des Kantons X.\n\n"
             "Sachverhalt:\n\nA. Die versicherte Person stürzte bei der Arbeit.\n\nErwägungen:\n\n1.\n\n"
-            "Gemäss Art. 6 Abs. 1 UVG werden die Versicherungsleistungen bei Berufsunfällen gewährt.\n\n"
-            f"Demnach erkennt das Bundesgericht:\n\n1.\n\n{EVIDENCE}") + " Begründung." * 120
+            "Gemäss Art. 6 Abs. 1 UVG werden die Versicherungsleistungen bei Berufsunfällen gewährt."
+            + " Begründung." * 120 +
+            f"\n\nDemnach erkennt das Bundesgericht:\n\n1.\n\n{EVIDENCE}\n\n2.\n\n"
+            "Dieses Urteil wird den Parteien schriftlich mitgeteilt.\n\n"
+            f"Luzern, {decided.day}. Oktober 2026\n\nIm Namen der IV. öffentlich-rechtlichen Abteilung\n\n"
+            "Der Präsident: X.")
 
 
 def closed_port() -> int:
@@ -62,14 +66,16 @@ def build(work: Path, llm_base_url: str) -> None:
     kb_path = work / "kb.sqlite"
     keys = [seed_kb(kb_path, docket, judgement_text(docket, decided, subject), decided, score, band)
             for docket, decided, subject, score, band in CASES]
+    config = {"LLM_NAME": MODEL, "LLM_BASE_URL": llm_base_url}
     with closing(review_kb.open_kb(kb_path)) as repo:
-        record = review_kb.get_record(repo, keys[0])
-    version = jobs.generation_version(record, {"LLM_NAME": MODEL, "LLM_BASE_URL": llm_base_url})
+        approved, drafted = (review_kb.get_record(repo, key) for key in keys[:2])
+    draft = json.dumps({"summary": APPROVED, "quotes": [EVIDENCE]}, ensure_ascii=False)
     with closing(review_store.connect(work / "review.sqlite")) as db:
-        review_store.save_result(db, keys[0], "de", version,
-                                 json.dumps({"summary": APPROVED, "quotes": [EVIDENCE]}, ensure_ascii=False), None)
-        assert review_store.approve(db, keys[0], "de", version, APPROVED, "")
-        assert sqlite3.connect(work / "review.sqlite").execute("SELECT COUNT(*) FROM results").fetchone()[0] == 1
+        # 8C_901: German summary approved. 8C_902: German draft waiting for approval. The others: no summary yet.
+        for record in (approved, drafted):
+            review_store.save_result(db, record["key"], "de", jobs.generation_version(record, config), draft, None)
+        assert review_store.approve(db, approved["key"], "de", jobs.generation_version(approved, config), APPROVED, "")
+        assert sqlite3.connect(work / "review.sqlite").execute("SELECT COUNT(*) FROM results").fetchone()[0] == 2
 
 
 def main() -> None:
