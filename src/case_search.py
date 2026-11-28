@@ -11,7 +11,7 @@ from collections import Counter
 import math
 import re
 
-from suva.parse.citations import extract
+from suva.parse.citations import ALIAS, extract
 
 K1, B = 1.2, 0.75
 EXACT_CITATION, SAME_ARTICLE = 4.0, 2.0  # boosts, in BM25 units
@@ -20,7 +20,7 @@ STOP = set("der die das den dem des ein eine einer eines einem einen und oder is
            "sie ihr ihre sein seine diese dieser dieses kann hat haben "
            "le la les du des un une au aux et ou est sont était ont été être dans par pour avec sur selon "
            "sans que qui dont cette ces entre elle ils elles son ses leur leurs pas plus peut fait "
-           "art abs lit let bge atf".split())
+           "art abs lit let bge atf".split()) | {alias.casefold() for alias in ALIAS}  # laws count as citations
 _token_cache: dict[tuple[str, str], Counter] = {}
 
 
