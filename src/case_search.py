@@ -37,6 +37,14 @@ def _counts(key: str, text: str) -> Counter:
     return _token_cache[marker]
 
 
+def warm(records: list[dict]) -> int:
+    """Tokenize the judgements ahead of the first search (the review app does this when it starts)."""
+    for rec in records:
+        if rec["full_text"].strip():
+            _counts(rec["key"], rec["full_text"])
+    return len(records)
+
+
 def query_citations(description: str) -> tuple[set[str], set[tuple[str, str]]]:
     cited = extract(description)
     exact = {c.canonical for c in cited if c.kind in ("statute", "bge")}

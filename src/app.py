@@ -533,6 +533,20 @@ def check_startup(strict):
     return True
 
 
+def warm_precedent_index():
+    """Build the precedent-search index in the background, so the first search is as fast as the next ones."""
+    import case_search
+
+    try:
+        with closing(connect()) as db:
+            extra = review_store.added_cases(db)
+        with closing(kb()) as repo:
+            count = case_search.warm(review_kb.window_records(repo, window(), extra, include_text=True))
+        app.logger.info("precedent_index_ready judgements=%d", count)
+    except (OSError, sqlite3.Error) as exc:
+        app.logger.warning("precedent_index_failed error=%s", type(exc).__name__)
+
+
 def main():
     configure_logging()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -554,6 +568,7 @@ def main():
     if args.command == "serve":
         if not check_startup(args.strict):
             return 2
+        threading.Thread(target=warm_precedent_index, name="precedent-index", daemon=True).start()
         app.run(host="127.0.0.1", port=args.port)
     elif args.command == "summarize-top":
         return jobs.summarize_top(args.limit, args.workers)

@@ -45,6 +45,24 @@ function App() {
   const lastQueue = useRef('/');
   if (screen === 'queue') lastQueue.current = '/' + url;
   const [precedents, setPrecedents] = useState<PrecedentSearch>({description: ''});
+  // Queue responses already seen (or prefetched on hover), so going back to a case, a filter or the queue from
+  // another screen shows at once while a fresh copy loads. In memory only; a reload starts empty.
+  const cache = useRef(new Map<string, Dashboard>());
+  const lastQueueQuery = useRef<string | null>(null);
+  function remember(query: string, data: Dashboard) {
+    cache.current.delete(query);
+    cache.current.set(query, data);
+    if (cache.current.size > 40) cache.current.delete(cache.current.keys().next().value!);
+  }
+  function prefetch(href: string) {
+    const query = new URLSearchParams(new URL(href, location.href).search);
+    query.delete('view');
+    const key = query.toString();
+    if (cache.current.has(key)) return;
+    fetch('/api/dashboard?' + key).then(response => response.ok ? response.json() : null)
+      .then((data: Dashboard | null) => { if (data && !cache.current.has(key)) remember(key, data); })
+      .catch(() => {});
+  }
   const caseLoading = Boolean(caseKey && !selected && !error && loadedQuery !== dataQuery);
   const displayed = selected ?? (caseLoading ? dashboard?.selected : null);
   const lastCaseView = useRef({view, lang});
@@ -92,6 +110,14 @@ function App() {
 
   useEffect(() => {
     if (queueQuery === null) return;
+    // A new query (not a refresh after an action, which must not show the state from before it): show the
+    // remembered copy right away.
+    const cached = queueQuery !== lastQueueQuery.current ? cache.current.get(queueQuery) : undefined;
+    lastQueueQuery.current = queueQuery;
+    if (cached) {
+      setDashboard(cached);
+      setLoadedQuery(queueQuery);
+    }
     const abort = new AbortController();
     let timer: number;
     let pending = false;
@@ -101,6 +127,7 @@ function App() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data: Dashboard = await response.json();
         if (abort.signal.aborted) return;
+        remember(queueQuery!, data);
         setDashboard(data);
         setLoadedQuery(queueQuery!);
         setError('');
@@ -237,6 +264,7 @@ function App() {
             <thead><tr><th scope="col">Judgment</th><th scope="col">Published</th><th scope="col">Status</th></tr></thead>
             <tbody>{dashboard.rows.map(row => <tr key={row.key} className={row.key === caseKey ? 'selected' : ''}>
               <td><a className="queue-link" href={link({case: row.key, view: null})} onClick={follow}
+                onPointerEnter={event => prefetch(event.currentTarget.href)} onFocus={event => prefetch(event.currentTarget.href)}
                 title={row.issue ?? undefined} aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
                 {row.title !== row.docket ? <div className="topic">{judgmentSubject(row.title)}</div>
                   : row.issue && <div className="topic">{row.issue}</div>}</td>

@@ -34,3 +34,9 @@ def test_terms_rank_and_highlight():
 
 def test_empty_description_finds_nothing():
     assert case_search.search(records(), citations_of, passages_of, "und der die") == []
+
+
+def test_warm_fills_the_index_used_by_search():
+    case_search._token_cache.clear()
+    assert case_search.warm(records()) == 2
+    assert len(case_search._token_cache) == 2
