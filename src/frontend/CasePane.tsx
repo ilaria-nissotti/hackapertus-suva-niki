@@ -156,7 +156,8 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       <div className="case-identity">
         <h2 id="case-title">{record.docket}</h2>
         <div className="case-score"><Status value={record.status}/>
-          {record.score !== null && <strong>{Math.round(record.score)}<small> / 100</small></strong>}</div>
+          {/* The display score is base + rule points (scoring/score.py): an ordering, not a percentage. */}
+          {record.score !== null && <strong>{Math.round(record.score)}<small> score</small></strong>}</div>
       </div>
       {record.title !== record.docket && <p className="case-name" lang={record.language ?? undefined}>{record.title}</p>}
       <dl className="metadata">

@@ -30,9 +30,11 @@ One data pipeline feeds one review workspace:
    separate, and a coverage ledger records which source listed each decision.
 2. **Parse** (`suva parse`): verbatim passages (header, regeste, facts,
    considerations, ruling) and citations (statutes, BGE, dockets) with offsets.
-3. **Score** (`suva score`): `rules/rules.yaml` turns fired rules into a 0–100
-   score, a band (high / check / low) and an explanation. No language model is
-   involved, so the same judgment and rules always give the same score.
+3. **Score** (`suva score`): `rules/rules.yaml` turns fired rules into rule
+   points and an explanation, and the reading list takes the top 30 per month
+   above a rule-points floor. The app shows the listed judgments as Relevant,
+   others above the floor as Review, and the rest as Low relevance. No language
+   model is involved, so the same judgment and rules always give the same result.
 4. **Review** (`src/app.py serve`): a Flask app serves the React/TypeScript
    build (Vite; Node.js only at build time). It reads judgments and scores from
    the knowledge base (`data/kb.sqlite`) and keeps drafts, approvals and audio
