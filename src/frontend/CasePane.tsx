@@ -1,19 +1,23 @@
 import type {MouseEvent} from 'react';
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useId, useRef, useState} from 'react';
 import {Conversation} from './Conversation';
-import {displayDate, fields} from './api';
+import {displayDate, fields, judgmentSubject, operativeText} from './api';
+import {Badge, Button, Collapsible, Textarea} from './components/ui/controls';
 import type {Action, Briefing, FiredRule, Judgment, Language} from './api';
 
 export const views = ['Overview', 'Legal summaries', 'Ask this judgment'] as const;
 export type View = typeof views[number];
+const viewLabels: Record<View, string> = {
+  Overview: 'Overview', 'Legal summaries': 'Summaries', 'Ask this judgment': 'Ask a question',
+};
 
 export function Status({value}: {value: string}) {
-  return <span className={'status ' + value.toLowerCase().replaceAll(' ', '-')}>{value}</span>;
+  return <Badge className={'status ' + value.toLowerCase().replaceAll(' ', '-')}>{value}</Badge>;
 }
 
 function Evidence({label, passages}: {label: string; passages?: string[]}) {
   if (!passages?.length) return null;
-  return <details><summary>{label}</summary>{passages.map((text, i) => <blockquote key={i}>{text}</blockquote>)}</details>;
+  return <Collapsible label={label}>{passages.map((text, i) => <blockquote key={i}>{text}</blockquote>)}</Collapsible>;
 }
 
 /** The stored ruling, paragraph by paragraph, with the court's paragraph numbers (1., 2.1 …) hung in the margin. */
@@ -41,22 +45,21 @@ function RulingText({text}: {text: string}) {
     <p key={i}><span className="paragraph-number">{block.number}</span>{block.text}</p>)}</div>;
 }
 
-const BANDS = {high: 'High relevance: read it', check: 'Check: skim it', low: 'Low relevance: likely skip'};
-
 function Relevance({record}: {record: Judgment}) {
-  const reasons = (sign: 1 | -1) => record.fired.filter(rule => Math.sign(rule.points) === sign);
+  const leading = record.score_current ? record.fired.filter(rule => rule.points > 0).slice(0, 2) : [];
   const list = (rules: FiredRule[]) => <ul className="reasons">{rules.map(rule =>
-    <li key={rule.id}><span className="points">{rule.points > 0 ? '+' : ''}{Math.round(rule.points)}</span> {rule.explanation}</li>)}</ul>;
-  if (record.score === null) return <p>Not scored yet. Run <code>python -m suva score</code>.</p>;
+    <li key={rule.id}><span className="points">{rule.points > 0 ? '+' : ''}{Math.round(rule.points)}</span>{rule.explanation}</li>)}</ul>;
+  if (record.score === null) return <p className="muted">This judgment hasn’t been scored.</p>;
   return <>
-    {!record.score_current && <p role="alert">This score is out of date (rules, parse or text changed). Run{' '}
-      <code>python -m suva parse</code>, then <code>python -m suva score</code>.</p>}
-    {record.band && (record.score_current ? <p><strong>{BANDS[record.band]}</strong></p>
-      : <p className="muted"><strong>{BANDS[record.band]}</strong> (from the out-of-date score)</p>)}
-    {reasons(1).length > 0 && <><h4>Why it was selected</h4>{list(reasons(1))}</>}
-    {reasons(-1).length > 0 && <><h4>What counts against it</h4>{list(reasons(-1))}</>}
-    {!record.fired.length && <p>No relevance rule matched this judgment.</p>}
-    <p className="muted">Deterministic score from the expert rules in rules/rules.yaml.</p>
+    {leading.length > 0 && <ul className="leading-reasons">{leading.map(rule =>
+      <li key={rule.id}>{rule.explanation}</li>)}</ul>}
+    {!record.score_current && <p role="status">This score is out of date.</p>}
+    {record.score_current && !leading.length && <p className="muted">No rules increased this score.</p>}
+    <Collapsible label="Score details">
+      <p><strong>Score {Math.round(record.score)}</strong>{!record.score_current && ' · Out of date'}</p>
+      {record.fired.length ? list(record.fired) : <p>No relevance rule matched.</p>}
+      <p className="muted">Rules: <code>rules/rules.yaml</code></p>
+    </Collapsible>
   </>;
 }
 
@@ -64,6 +67,7 @@ function Summary({record, lang, audio, action, busy, visible}: {
   record: Judgment; lang: Language; audio: Briefing; action: Action; busy: boolean; visible: boolean;
 }) {
   const result = record[lang];
+  const formId = useId();
   const saved = result.approved ?? result.data.summary ?? '';
   const [edit, setEdit] = useState<string>();
   const [saveStatus, setSaveStatus] = useState('');
@@ -85,12 +89,17 @@ function Summary({record, lang, audio, action, busy, visible}: {
     }
   }, [result.approved, submitted]);
   const base = {case: record.key, lang};
+  const canGenerate = !record.de.active && !record.fr.active && !(record.de.data.summary && record.fr.data.summary);
+  const retry = Boolean(record.de.error || record.fr.error);
+  const dirty = edit !== undefined && edit.trim() !== saved.trim();
+  const canSave = Boolean(result.data.summary && !result.active && !result.error && (!result.approved || dirty));
+  const canCreateAudio = Boolean(result.approved && audio.configured && !audio.active && !audio.ready);
+  const generate = () => action('/run', fields({case: record.key, action: 'summarize'}));
   return <>
     <section>
-      <h3>Legal summary</h3>
       {result.active ? <p role="status">Generating summary…</p> : result.error ?
         <p role="alert">{result.error}</p> : result.data.summary ?
-        <form onSubmit={async event => {
+        <form id={formId} onSubmit={async event => {
           event.preventDefault();
           const summary = (edit ?? saved).trim();
           setSaveError('');
@@ -104,44 +113,44 @@ function Summary({record, lang, audio, action, busy, visible}: {
             setSaveStatus('');
           }
         }}>
-          <label>{result.approved ? 'Approved summary' : 'AI draft: review it before approving'}
-            <textarea lang={lang} rows={12} required maxLength={16000} disabled={busy}
+          <label>{result.approved ? 'Approved summary' : 'Draft summary'}
+            <Textarea lang={lang} rows={12} required maxLength={16000} disabled={busy}
               value={edit ?? saved} onChange={event => {
                 setEdit(event.target.value);
                 setSaveError('');
                 setSaveStatus('');
               }}/>
           </label>
-          <button className="primary" disabled={busy || !(edit ?? saved).trim()}>
-            {result.approved ? 'Save approved edit' : 'Approve summary'}
-          </button>
           {saveStatus && <p className="save-feedback" role="status">{saveStatus}</p>}
           {saveError && <p className="save-feedback" role="alert">{saveError}</p>}
-        </form> : <p>Generate independent German and French drafts from the original ruling.</p>}
+        </form> : (record.de.active || record.fr.active) && <p role="status">Generating summaries…</p>}
       <Evidence label="Supporting passages for the draft" passages={result.data.quotes}/>
-      {!record.de.active && !record.fr.active && !(record.de.data.summary && record.fr.data.summary) &&
-        <button className="primary" disabled={busy}
-          onClick={() => action('/run', fields({case: record.key, action: 'summarize'}))}>
-          {record.de.error || record.fr.error ? 'Retry summaries' : 'Summarize judgment'}
-        </button>}
     </section>
-    <section className="briefing" id="case-briefing">
+    {result.approved && <section className="briefing" id="case-briefing">
       <h3>Audio briefing</h3>
-      {!result.approved ? <p>Approve this summary to enable audio.</p> : audio.ready ?
+      {audio.ready ?
         <>
           <audio key={audio.key} ref={player} controls preload="none"
             aria-label={lang === 'de' ? 'German case briefing' : 'French case briefing'}
             src={'/briefing/' + audio.key + '.mp3?' + new URLSearchParams({case: record.key, lang})}/>
-          <details><summary>Read transcript</summary><p className="source" lang={lang}>{audio.script}</p></details>
+          <Collapsible label="Read transcript"><p className="source" lang={lang}>{audio.script}</p></Collapsible>
           <Evidence label="Supporting passages for the briefing" passages={audio.excerpts}/>
         </> : audio.active ? <p role="status">Generating audio…</p> : !audio.configured ?
-        <p>Audio is unavailable until ElevenLabs is configured for this language.</p> : <>
-          {audio.error && <p role="alert">{audio.error}</p>}
-          <button disabled={busy} onClick={() => action('/briefing', fields(base))}>
-            {audio.error ? 'Retry briefing' : 'Generate briefing'}
-          </button>
-        </>}
-    </section>
+        <p className="muted">Audio is unavailable for this language.</p> :
+        audio.error && <p role="alert">{audio.error}</p>}
+    </section>}
+    {(canSave || canGenerate || canCreateAudio) && <div className="case-actions">
+      {canSave ? <Button type="submit" form={formId} disabled={busy || !(edit ?? saved).trim()}>
+        {result.approved ? 'Save approved edit' : 'Approve summary'}
+      </Button> : canCreateAudio ? <Button disabled={busy} onClick={() => action('/briefing', fields(base))}>
+        {audio.error ? 'Retry briefing' : 'Create audio briefing'}
+      </Button> : canGenerate && <Button disabled={busy} onClick={generate}>
+        {retry ? 'Retry summaries' : 'Generate summaries'}
+      </Button>}
+      {canGenerate && (canSave || canCreateAudio) && <Button variant="outline" disabled={busy} onClick={generate}>
+        {retry ? 'Retry summaries' : 'Generate both drafts'}
+      </Button>}
+    </div>}
   </>;
 }
 
@@ -150,26 +159,40 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
   selectView: (view: View) => void; selectLanguage: (lang: Language) => void;
   close: string; onClose: (event: MouseEvent<HTMLAnchorElement>) => void; action: Action; busy: boolean;
 }) {
+  const result = record[lang];
+  const drafting = record.de.active || record.fr.active;
+  const retry = Boolean(record.de.error || record.fr.error);
+  const decision = record.decision ? operativeText(record.decision) : '';
+  const createAudio = Boolean(result.approved && audio.configured && !audio.active && !audio.ready);
+  const summaryAction = createAudio ? (audio.error ? 'Retry briefing' : 'Create audio briefing') :
+    result.approved ? 'Open summary' : result.data.summary ? 'Review draft' :
+    drafting ? 'View summaries' : retry ? 'Retry summaries' : 'Generate summaries';
+  function openSummaries() {
+    selectView('Legal summaries');
+    if (createAudio) {
+      void action('/briefing', fields({case: record.key, lang}));
+    } else if (!result.data.summary && !drafting) {
+      void action('/run', fields({case: record.key, action: 'summarize'}));
+    }
+  }
   return <article className="panel case" aria-labelledby="case-title">
     <header className="case-header">
       <a className="back" href={close} onClick={onClose}>Back to queue</a>
       <div className="case-identity">
-        <h2 id="case-title">{record.docket}</h2>
-        <div className="case-score"><Status value={record.status}/>
-          {/* The display score is base + rule points (scoring/score.py): an ordering, not a percentage. */}
-          {record.score !== null && <strong>{Math.round(record.score)}<small> score</small></strong>}</div>
+        <span className="case-docket">{record.docket}</span>
+        <Status value={record.status}/>
       </div>
-      {record.title !== record.docket && <p className="case-name" lang={record.language ?? undefined}>{record.title}</p>}
+      <h2 id="case-title" className="case-name" lang={record.language ?? undefined}>{judgmentSubject(record.title)}</h2>
       <dl className="metadata">
-        <div><dt>Court</dt><dd>Federal Supreme Court</dd></div>
         <div><dt>Decided</dt><dd>{displayDate(record.decision_date)}</dd></div>
-        <div><dt>Published</dt><dd>{record.publication_date ? displayDate(record.publication_date) +
-          (record.date_source ? ` (${record.date_source})` : '') : 'Unknown'}</dd></div>
+        {record.publication_date
+          ? <div><dt>Published</dt><dd>{displayDate(record.publication_date)}</dd></div>
+          : <div><dt>Publication date</dt><dd>unknown</dd></div>}
       </dl>
     </header>
     <nav className="case-nav" aria-label="Judgment sections">
-      {views.map(item => <button key={item} type="button" aria-pressed={view === item}
-        onClick={() => selectView(item)}>{item}</button>)}
+      {views.map(item => <Button key={item} variant="ghost" aria-pressed={view === item}
+        onClick={() => selectView(item)}>{viewLabels[item]}</Button>)}
     </nav>
     <div className="case-body">
       {view !== 'Overview' && <div className="segmented languages" aria-label="Review language">
@@ -178,14 +201,24 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       </div>}
       <div hidden={view !== 'Overview'}>
         <section>
-          <h3>Relevance to Suva</h3>
+          <h3>Court’s decision</h3>
+          {decision ? <div lang={record.language ?? undefined}><RulingText text={decision}/></div>
+            : <p className="muted">No decision excerpt available.</p>}
+        </section>
+        <section>
+          <h3>Why this was flagged</h3>
           <Relevance record={record}/>
         </section>
         <section>
           <h3>Original judgment</h3>
-          {record.source_url && <a href={record.source_url} target="_blank" rel="noopener noreferrer">Open source judgment</a>}
-          <details><summary>Read judgment text</summary><RulingText text={record.full_text}/></details>
+          {record.title !== judgmentSubject(record.title) &&
+            <p className="official-title" lang={record.language ?? undefined}>{record.title}</p>}
+          {record.full_text && <Collapsible label="Read full judgment"><RulingText text={record.full_text}/></Collapsible>}
+          {record.source_url && <a href={record.source_url} target="_blank" rel="noopener noreferrer">Open source</a>}
         </section>
+        <div className="case-actions">
+          <Button disabled={busy} onClick={openSummaries}>{summaryAction}</Button>
+        </div>
       </div>
       <div hidden={view !== 'Legal summaries'}>
         <Summary key={JSON.stringify([lang, record[lang].version])} record={record} lang={lang} audio={audio} action={action} busy={busy} visible={view === 'Legal summaries'}/>

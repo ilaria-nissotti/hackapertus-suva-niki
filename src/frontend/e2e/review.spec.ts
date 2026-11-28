@@ -4,6 +4,7 @@ import type {Page} from '@playwright/test';
 
 // Fictional cases from scripts/ui_fixture.py. The first one has an approved German summary.
 const RELEVANT = '8C_901/2026@2026-10-01';
+const SUBJECT = 'Unfallversicherung (Unfallkausalität)';
 const caseUrl = (key: string, view?: string) =>
   '/?' + new URLSearchParams({case: key, ...(view ? {view} : {})});
 
@@ -27,7 +28,7 @@ test.describe('accessibility (axe, WCAG 2.1 A/AA)', () => {
   for (const view of ['Overview', 'Legal summaries', 'Ask this judgment']) {
     test(`case pane: ${view}`, async ({page}) => {
       await open(page, caseUrl(RELEVANT, view));
-      await expect(page.getByRole('heading', {name: '8C_901/2026'})).toBeVisible();
+      await expect(page.getByRole('heading', {name: SUBJECT})).toBeVisible();
       await expectAccessible(page);
     });
   }
@@ -57,7 +58,7 @@ test.describe('keyboard', () => {
     await link.focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/case=8C_901/);
-    await expect(page.getByRole('heading', {name: '8C_901/2026'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: SUBJECT})).toBeVisible();
   });
 
   test('tab order reaches the search, the filters and the first case', async ({page}) => {
@@ -82,6 +83,25 @@ test.describe('keyboard', () => {
   });
 });
 
+test('overview leads with the decision and keeps score and coverage details on demand', async ({page}) => {
+  await open(page, caseUrl(RELEVANT));
+  const casePane = page.getByRole('article', {name: SUBJECT});
+  await expect(casePane.getByRole('heading', {name: 'Court’s decision'})).toBeVisible();
+  await expect(casePane.getByText(/Die Beschwerde wird abgewiesen/).first()).toBeVisible();
+  await expect(page.getByRole('columnheader', {name: 'Score', exact: true})).toHaveCount(0);
+  await expect(casePane.getByText('Score 88', {exact: true})).toBeHidden();
+  await casePane.getByText('Score details', {exact: true}).click();
+  await expect(casePane.getByText('Score 88', {exact: true})).toBeVisible();
+  await expect(page.getByText(/Publication window:/)).toBeHidden();
+  await page.getByText('Coverage', {exact: true}).click();
+  await expect(page.getByText(/Publication window:/)).toBeVisible();
+  await casePane.getByRole('button', {name: 'Open summary'}).click();
+  await expect(casePane.getByRole('textbox', {name: 'Approved summary'})).toBeVisible();
+  await expect(casePane.getByRole('button', {name: 'Save approved edit'})).toBeHidden();
+  await casePane.getByRole('textbox', {name: 'Approved summary'}).fill('Die Beschwerde wird abgewiesen.');
+  await expect(casePane.getByRole('button', {name: 'Save approved edit'})).toBeVisible();
+});
+
 test.describe('screenshots at 1440×900', () => {
   test('queue', async ({page}) => {
     await open(page, '/');
@@ -90,7 +110,7 @@ test.describe('screenshots at 1440×900', () => {
 
   test('case open', async ({page}) => {
     await open(page, caseUrl(RELEVANT));
-    await expect(page.getByRole('heading', {name: '8C_901/2026'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: SUBJECT})).toBeVisible();
     await expect(page).toHaveScreenshot('case-open.png');
   });
 

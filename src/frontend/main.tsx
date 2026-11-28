@@ -3,12 +3,14 @@ import type {FormEvent, MouseEvent} from 'react';
 import {createRoot} from 'react-dom/client';
 import {CasePane, Status, views} from './CasePane';
 import type {View} from './CasePane';
-import {displayDate} from './api';
+import {displayDate, judgmentSubject} from './api';
+import {Button, Collapsible, Input} from './components/ui/controls';
 import type {Dashboard, Language} from './api';
 import '@fontsource-variable/atkinson-hyperlegible-next';
 import '@fontsource-variable/literata';
 import './style.css';
 
+const count = new Intl.NumberFormat('en');
 const statuses = ['Relevant', 'Review', 'Low relevance', 'Stale', 'Unscored'];
 
 function App() {
@@ -139,58 +141,56 @@ function App() {
     <header className="masthead">
       <div className="topbar">
         <a className="brand" href="/" onClick={follow}><span aria-hidden="true">§</span> Judgment Review</a>
-        <span className="challenge">Suva challenge <span aria-hidden="true">/</span> Apertus</span>
+        <span className="challenge">Suva</span>
       </div>
     </header>
     <main>
       <div className="headline">
         <h1>Federal Court judgments</h1>
-        <button className="primary" onClick={() => {setAddError(''); dialog.current?.showModal();}}>Add judgment</button>
       </div>
       <dialog ref={dialog} aria-labelledby="add-title" onCancel={event => {if (busy) event.preventDefault();}}>
         <form ref={form} onSubmit={event => {event.preventDefault(); void action('/add', new FormData(event.currentTarget));}}>
           <h2 id="add-title">Add judgment</h2>
-          <p>Add a judgment from the knowledge base, or upload its original text.</p>
-          <label>Case ID<input name="docket" placeholder="8C_123/2026" required/></label>
-          <label>Decision date (required for uploads or multiple decisions)<input name="decision_date" type="date"/></label>
-          <label>Original text file (optional)<input name="text" type="file" accept=".txt,text/plain"/></label>
-          <label>Original URL (optional)<input name="source_url" type="url"/></label>
-          <label>Publication date (optional)<input name="publication_date" type="date"/></label>
+          <label>Case ID<Input name="docket" placeholder="8C_123/2026" required/></label>
+          <label>Decision date (required for uploads or multiple decisions)<Input name="decision_date" type="date"/></label>
+          <label>Original text file (optional)<Input name="text" type="file" accept=".txt,text/plain"/></label>
+          <label>Original URL (optional)<Input name="source_url" type="url"/></label>
+          <label>Publication date (optional)<Input name="publication_date" type="date"/></label>
           {addError && <p role="alert">{addError}</p>}
           <div className="actions">
-            <button className="primary" disabled={busy}>{busy ? 'Adding…' : 'Add judgment'}</button>
-            <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>Cancel</button>
+            <Button type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add judgment'}</Button>
+            <Button variant="outline" disabled={busy} onClick={() => dialog.current?.close()}>Cancel</Button>
           </div>
         </form>
       </dialog>
       {dashboard && <div className="coverage">
-        <dl className="metrics">
-          <div><dt>Judgments</dt><dd>{dashboard.count}</dd></div>
-          <div><dt>Scored</dt><dd>{dashboard.scored}</dd></div>
-          <div><dt>Shortlisted</dt><dd>{dashboard.shortlist}</dd></div>
-        </dl>
-        <div className="coverage-dates">
-          <strong>{dashboard.dates ? 'Observed publications' : 'No dated publications in the window yet'}</strong>
-          {dashboard.dates && <span>{displayDate(dashboard.dates[0])} – {displayDate(dashboard.dates[1])}</span>}
-          <small>Window: published {displayDate(dashboard.window[0])}–{displayDate(dashboard.window[1])}.
-            {dashboard.unknown_publication > 0 && ` ${dashboard.unknown_publication} with unknown publication date included.`}
-            {' '}Source coverage may be incomplete.</small>
-        </div>
+        <p><strong>{count.format(dashboard.count)} judgments</strong> · {count.format(dashboard.shortlist)} shortlisted
+          {dashboard.count > dashboard.scored && ` · ${count.format(dashboard.count - dashboard.scored)} unscored`}
+        </p>
+        <Collapsible label="Coverage">
+          <p>Publication window: {displayDate(dashboard.window[0])}–{displayDate(dashboard.window[1])}</p>
+          {dashboard.dates && <p>Dates found: {displayDate(dashboard.dates[0])}–{displayDate(dashboard.dates[1])}</p>}
+          {dashboard.unknown_publication > 0 && <p>{count.format(dashboard.unknown_publication)} cases have no publication date.</p>}
+          <p>Source coverage may be incomplete.</p>
+        </Collapsible>
       </div>}
-      {dashboard && dashboard.stale > 0 && <p className="notice warning" role="status">
-        <strong>{dashboard.stale} of {dashboard.count} scores are out of date</strong>, so they show as Stale and
-        don’t count toward the shortlist. Run <code>python -m suva parse</code>, then <code>python -m suva score</code>,
-        and reload.</p>}
+      {dashboard && dashboard.stale > 0 && <Collapsible className="notice warning"
+        label={`${count.format(dashboard.stale)} scores are out of date`}>
+        <p>Stale cases are excluded from the shortlist. Run <code>python -m suva parse</code> and <code>python -m suva score</code>, then reload.</p>
+      </Collapsible>}
       {notice && <p className="notice" role="status">{notice}</p>}
       {error && <div className="notice" role="alert">{error} <button onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
       {!dashboard && !error && <p role="status">Loading judgments…</p>}
       {dashboard && <div className={'workspace' + (selected ? ' has-case' : '')}>
         <section className="panel queue" aria-labelledby="queue-title">
           <div className="queue-header">
-            <h2 id="queue-title">Review queue <small>{dashboard.total}</small></h2>
+            <div className="queue-heading">
+              <h2 id="queue-title">Review queue {dashboard.total !== dashboard.count && <small>{count.format(dashboard.total)} matches</small>}</h2>
+              <Button variant="outline" onClick={() => {setAddError(''); dialog.current?.showModal();}}>Add judgment</Button>
+            </div>
             <form className="filters" key={JSON.stringify([params.get('q'), params.get('status'), params.get('sort')])}
               onSubmit={filter}>
-              <input name="q" type="search" aria-label="Search cases" placeholder="Search case or legal issue" defaultValue={params.get('q') ?? ''}/>
+              <Input name="q" type="search" aria-label="Search cases" placeholder="Search case or legal issue" defaultValue={params.get('q') ?? ''}/>
               <select name="status" aria-label="Review status" defaultValue={params.get('status') ?? ''}
                 onChange={event => event.currentTarget.form?.requestSubmit()}>
                 <option value="">All statuses</option>
@@ -200,25 +200,22 @@ function App() {
                 onChange={event => event.currentTarget.form?.requestSubmit()}>
                 <option value="score">Highest score</option><option value="date">Newest publication</option>
               </select>
-              <button>Search</button>
+              <Button type="submit" variant="outline">Search</Button>
             </form>
           </div>
           <div className="table-wrap"><table>
-            <thead><tr><th scope="col">Judgment</th><th scope="col">Published</th><th scope="col">Score</th><th scope="col">Status</th></tr></thead>
+            <thead><tr><th scope="col">Judgment</th><th scope="col">Published</th><th scope="col">Status</th></tr></thead>
             <tbody>{dashboard.rows.map(row => <tr key={row.key} className={row.key === caseKey ? 'selected' : ''}>
               <td><a href={link({case: row.key, view: null})} onClick={follow}
                 aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
-                {row.title !== row.docket ? <div className="topic" title={row.issue ?? undefined}>{row.title}</div>
+                {row.title !== row.docket ? <div className="topic" title={row.issue ?? undefined}>{judgmentSubject(row.title)}</div>
                   : row.issue && <div className="topic">{row.issue}</div>}</td>
-              <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td><td className="score">{row.score === null ? '—' : Math.round(row.score)}</td>
+              <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td>
               <td><Status value={row.status}/></td>
             </tr>)}</tbody>
           </table></div>
-          {!dashboard.rows.length && <p className="empty">{!dashboard.count ?
-            'No judgments in the window. Run python -m suva fetch, parse and score.'
-            : dashboard.stale > 0 && params.get('status') && params.get('status') !== 'Stale' ?
-            `No judgments match these filters. ${dashboard.stale} judgments have out-of-date scores and are listed as Stale until they are re-scored.`
-            : 'No judgments match these filters.'}</p>}
+          {!dashboard.rows.length && <p className="empty">{dashboard.count
+            ? 'No judgments match these filters.' : 'No judgments in this window.'}</p>}
           {dashboard.total > 30 && <nav className="pagination" aria-label="Queue pages">
             {dashboard.page > 2 && <a href={link({page: null})} onClick={follow}>First</a>}
             {dashboard.page > 1 && <a href={link({page: String(dashboard.page - 1)})} onClick={follow}>Previous</a>}
@@ -233,14 +230,11 @@ function App() {
           close={close} onClose={follow} action={action} busy={busy}/>}
         {!caseKey && <section className="panel case-placeholder">
           <h2>Select a judgment</h2>
-          <p>Choose a case in the queue to see why it was selected, draft the German and French summaries, and ask
-            questions about the ruling.</p>
         </section>}
         {caseKey && !selected && <section className="panel empty" role="status">{
           loadedQuery === dataQuery ? 'Judgment unavailable.' : error ? 'Judgment could not be loaded.' : 'Loading judgment…'
         } <a href={close} onClick={follow}>Back to queue</a></section>}
       </div>}
-      {dashboard && <footer>Model {dashboard.model}</footer>}
     </main>
   </>;
 }
