@@ -217,6 +217,11 @@ function App() {
         {selected && <CasePane key={selected.key} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
           selectView={value => navigate(link({view: value}))} selectLanguage={value => navigate(link({lang: value}))}
           close={close} onClose={follow} action={action} busy={busy}/>}
+        {!caseKey && <section className="panel case-placeholder">
+          <h2>Select a judgment</h2>
+          <p>Choose a case in the queue to see why it was selected, draft the German and French summaries, and ask
+            questions about the ruling.</p>
+        </section>}
         {caseKey && !selected && <section className="panel empty" role="status">{
           loadedQuery === dataQuery ? 'Judgment unavailable.' : error ? 'Judgment could not be loaded.' : 'Loading judgment…'
         } <a href={close} onClick={follow}>Back to queue</a></section>}
