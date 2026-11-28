@@ -35,3 +35,5 @@ data/*.sqlite-*
 data/raw/
 # Scoring outputs (dataset, feature stats, scores, judge verdicts) — regenerated from the KB
 data/scoring/
+# Suggested weights from `fit-weights`: reviewed by experts, then copied into rules.yaml
+rules/rules.fitted.yaml

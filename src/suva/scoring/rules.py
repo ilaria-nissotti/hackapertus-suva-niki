@@ -16,8 +16,19 @@ A graded rule counts matches instead (points per match, capped):
       per_match: 3
       max: 15
 
-Text fields match terms as whole words, case-insensitive by default.
-List fields (laws, articles, bge, chamber, language) match exact values.
+Text fields match terms as whole words, case-insensitive by default; `none: [...]` stops
+a rule from firing when one of those terms is present.
+List fields (laws, articles, bge, chamber, language, outcome) match exact values.
+Number fields (reasoning_pages) fire from `match: {min: N}`; graded, they count the number.
+The fields appellant, outcome and reasoning_pages are derived in derive.py.
+
+Selection turns rule points (without base) into the list lawyers read: the top N per period,
+never below a floor:
+
+    selection:
+      top_n: 30              # judgements shown per period
+      floor_rule_points: 66  # none shown below this many rule points, even if the period has fewer than N
+      per: month             # month | week | period (the whole input as one list)
 """
 
 from __future__ import annotations
@@ -33,13 +44,22 @@ from suva.config import REPO_ROOT
 
 DEFAULT_RULES_PATH = REPO_ROOT / "rules" / "rules.yaml"
 
-TEXT_FIELDS = ("parties", "subject", "header", "regeste", "facts", "considerations", "dispositiv", "text")
-LIST_FIELDS = ("laws", "articles", "bge", "chamber", "language")
-FIELDS = TEXT_FIELDS + LIST_FIELDS
-MATCH_KINDS = ("any", "all", "regex")
+TEXT_FIELDS = ("parties", "appellant", "subject", "header", "regeste", "facts", "considerations", "dispositiv",
+               "text")
+LIST_FIELDS = ("laws", "articles", "bge", "chamber", "language", "outcome")
+NUMBER_FIELDS = ("reasoning_pages",)
+FIELDS = TEXT_FIELDS + LIST_FIELDS + NUMBER_FIELDS
+MATCH_KINDS = ("any", "all", "regex", "none", "min")
 SOURCES = ("expert", "data", "apertus", "hypothesis")
+GROUPS = ("topic", "significance")  # what a rule describes; `compare` adds groups one by one
 JUDGE_LEVELS = ("high", "medium", "low")
-DEFAULT_SCALE = 10.0  # points per unit of log-odds: +10 points multiplies the odds of relevance by e
+PERIODS = ("month", "week", "period")  # selection.per: how judgements are grouped before taking the top N
+OBSOLETE_KEYS = {  # keys of the old 0-100 score; rejected so a stale rules file does not silently change meaning
+    "threshold": "replaced by selection.top_n and selection.floor_rule_points",
+    "bands": "removed: judgements are ranked by points, see selection",
+    "scale": "removed: points are no longer turned into a 0-100 score",
+    "similarity": "similarity to past picks (citations, embeddings) was removed; see docs/pitch-stats.md",
+}
 
 
 class RulesError(ValueError):
@@ -56,13 +76,17 @@ class Rule:
     any: list[str] = field(default_factory=list)
     all: list[str] = field(default_factory=list)
     regex: str | None = None
+    none: list[str] = field(default_factory=list)  # the rule does not fire if any of these is found
+    min: float | None = None  # number fields: fires from this value on
     case_sensitive: bool = False
+    group: str = "topic"
     source: str = "hypothesis"
     evidence: str = ""
     per_match: float | None = None  # graded rule: points per match instead of a fixed weight
     max: float | None = None  # graded rule: cap on the points (same sign as per_match)
     _patterns: list[re.Pattern] = field(default_factory=list, repr=False)
     _all_patterns: list[re.Pattern] = field(default_factory=list, repr=False)
+    _none_patterns: list[re.Pattern] = field(default_factory=list, repr=False)
     _regex: re.Pattern | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -71,6 +95,7 @@ class Rule:
         if self.field in TEXT_FIELDS:
             self._patterns = [word(t) for t in self.any]
             self._all_patterns = [word(t) for t in self.all]
+            self._none_patterns = [word(t) for t in self.none]
         if self.regex:
             self._regex = re.compile(self.regex, flags)
 
@@ -90,10 +115,15 @@ class Rule:
         value = record.get(self.field)
         if value is None:
             return 0
+        if self.field in NUMBER_FIELDS:  # the count is the number itself, e.g. pages of reasoning
+            number = int(value)
+            return number if number >= (self.min if self.min is not None else 1) else 0
         if self.field in LIST_FIELDS:
             values = value if isinstance(value, (list, tuple, set)) else [value]
             norm = (lambda s: str(s)) if self.case_sensitive else (lambda s: str(s).casefold())
             have = {norm(v) for v in values}
+            if have & {norm(t) for t in self.none}:
+                return 0
             hits = len(have & {norm(t) for t in self.any}) if self.any else None
             if hits == 0 or (self.all and not {norm(t) for t in self.all} <= have):
                 return 0
@@ -102,6 +132,8 @@ class Rule:
                 return 0
             return hits if hits is not None else regex_hits if regex_hits is not None else len(self.all)
         text = str(value)
+        if any(p.search(text) for p in self._none_patterns):
+            return 0
         hits = sum(len(p.findall(text)) for p in self._patterns) if self._patterns else None
         if hits == 0 or (self._all_patterns and not all(p.search(text) for p in self._all_patterns)):
             return 0
@@ -131,12 +163,19 @@ class Rule:
 
 
 @dataclass
+class Selection:
+    """Which judgements are shown: the top_n by rule points per period, none below floor_rule_points."""
+
+    top_n: int | None = 30  # None: no limit, only the floor applies
+    floor_rule_points: float | None = None  # in rule points, without base; None: no floor
+    per: str = "month"  # month | week | period
+
+
+@dataclass
 class RuleSet:
     rules: list[Rule]
-    threshold: float = 50.0  # on the 0-100 score
-    base: float = 0.0  # starting points before any rule fires
-    scale: float = DEFAULT_SCALE
-    bands: dict[str, float] = field(default_factory=lambda: {"high": 70.0, "low": 30.0})
+    base: float = 0.0  # added to the rule points for display only; never used to rank, select or gate
+    selection: Selection = field(default_factory=Selection)
     judge: dict[str, Any] = field(default_factory=dict)
     path: Path | None = None
 
@@ -144,8 +183,19 @@ class RuleSet:
         return next(r for r in self.rules if r.id == rule_id)
 
     @property
+    def feature_ids(self) -> list[str]:
+        """Inputs of the score that fit-weights can weigh: one per rule."""
+        return [r.id for r in self.rules]
+
+    @property
     def judge_points(self) -> dict[str, float]:
         return {k: float(v) for k, v in (self.judge.get("points") or {}).items()}
+
+    @property
+    def judge_floor_rule_points(self) -> float | None:
+        """Judgements with at least this many rule points (no base) are sent to the judge (None: all)."""
+        value = self.judge.get("candidate_floor_rule_points")
+        return None if value is None else float(value)
 
 
 def _rule_from_dict(raw: dict[str, Any], index: int) -> Rule:
@@ -165,11 +215,21 @@ def _rule_from_dict(raw: dict[str, Any], index: int) -> Rule:
     match = raw["match"]
     if not isinstance(match, dict) or not match or set(match) - set(MATCH_KINDS):
         raise RulesError(f"{where}: match needs at least one of {', '.join(MATCH_KINDS)}")
-    for kind in ("any", "all"):
+    for kind in ("any", "all", "none"):
         terms = match.get(kind, [])
         if not isinstance(terms, list) or not all(isinstance(t, (str, int)) and str(t).strip() for t in terms):
             raise RulesError(f"{where}: match.{kind} must be a list of non-empty terms")
     is_number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731
+    if raw["field"] in NUMBER_FIELDS:
+        if set(match) != {"min"} or not is_number(match["min"]):
+            raise RulesError(f"{where}: number field {raw['field']} needs match: {{min: <number>}} and nothing else")
+    elif "min" in match:
+        raise RulesError(f"{where}: match.min only applies to number fields ({', '.join(NUMBER_FIELDS)})")
+    elif not set(match) & {"any", "all", "regex"}:
+        raise RulesError(f"{where}: match.none only excludes; add any, all or regex to say what fires")
+    group = raw.get("group", "topic")
+    if group not in GROUPS:
+        raise RulesError(f"{where}: group must be one of {', '.join(GROUPS)}")
     for key in ("weight", "per_match", "max"):
         if key in raw and not is_number(raw[key]):
             raise RulesError(f"{where}: {key} must be a number")
@@ -185,7 +245,9 @@ def _rule_from_dict(raw: dict[str, Any], index: int) -> Rule:
             max=float(raw["max"]) if "max" in raw else None,
             explanation=str(raw["explanation"]), description=str(raw.get("description", "")),
             any=[str(t) for t in match.get("any", [])], all=[str(t) for t in match.get("all", [])],
-            regex=match.get("regex"), case_sensitive=bool(raw.get("case_sensitive", False)),
+            regex=match.get("regex"), none=[str(t) for t in match.get("none", [])],
+            min=float(match["min"]) if "min" in match else None,
+            case_sensitive=bool(raw.get("case_sensitive", False)), group=group,
             source=source, evidence=str(raw.get("evidence", "") or ""),
         )
     except re.error as exc:
@@ -197,26 +259,55 @@ def parse_rules(data: dict[str, Any], path: Path | None = None) -> RuleSet:
         raise RulesError("rules file must contain a top-level 'rules:' list")
     rules = [_rule_from_dict(raw, i) for i, raw in enumerate(data["rules"])]
     seen: set[str] = set()
-    for r in rules:
-        if r.id in seen:
-            raise RulesError(f"duplicate rule id {r.id!r}")
-        seen.add(r.id)
-    for key in ("threshold", "base", "scale"):
-        if key in data and not isinstance(data[key], (int, float)):
-            raise RulesError(f"{key} must be a number")
-    if data.get("scale", DEFAULT_SCALE) <= 0:
-        raise RulesError("scale must be positive")
-    bands = {"high": 70.0, "low": 30.0} | {k: float(v) for k, v in (data.get("bands") or {}).items()}
-    if set(bands) != {"high", "low"} or not 0 <= bands["low"] <= bands["high"] <= 100:
-        raise RulesError("bands needs 'high' and 'low' between 0 and 100, with low <= high")
+    for item_id in [r.id for r in rules]:
+        if item_id in seen:
+            raise RulesError(f"duplicate rule id {item_id!r}")
+        seen.add(item_id)
+    for key, why in OBSOLETE_KEYS.items():
+        if key in data:
+            raise RulesError(f"'{key}' is no longer used ({why}); remove it from the rules file")
+    if "base" in data and not _is_number(data["base"]):
+        raise RulesError("base must be a number")
     judge = data.get("judge") or {}
+    if "candidate_threshold" in judge:
+        raise RulesError("judge.candidate_threshold is no longer used: set judge.candidate_floor_rule_points "
+                         "(rule points without base) instead")
+    if "candidate_floor_points" in judge:
+        raise RulesError("judge.candidate_floor_points is no longer used: set judge.candidate_floor_rule_points, "
+                         "in rule points without base (old value minus base)")
+    if judge.get("candidate_floor_rule_points") is not None and not _is_number(judge["candidate_floor_rule_points"]):
+        raise RulesError("judge.candidate_floor_rule_points must be a number of rule points")
     points = judge.get("points") or {}
     if set(points) - set(JUDGE_LEVELS) or not all(isinstance(v, (int, float)) for v in points.values()):
         raise RulesError(f"judge.points may only set numbers for {', '.join(JUDGE_LEVELS)}")
     return RuleSet(
-        rules=rules, threshold=float(data.get("threshold", 50)), base=float(data.get("base", 0)),
-        scale=float(data.get("scale", DEFAULT_SCALE)), bands=bands, judge=judge, path=path,
+        rules=rules, base=float(data.get("base", 0)), selection=_parse_selection(data.get("selection")),
+        judge=judge, path=path,
     )
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _parse_selection(data: Any) -> Selection:
+    if data is None:
+        return Selection()
+    if isinstance(data, dict) and "floor_points" in data:
+        raise RulesError("selection.floor_points is no longer used: set selection.floor_rule_points, "
+                         "in rule points without base (old value minus base)")
+    if not isinstance(data, dict) or set(data) - {"top_n", "floor_rule_points", "per"}:
+        raise RulesError("selection may only set top_n, floor_rule_points and per")
+    top_n = data.get("top_n", Selection.top_n)
+    if top_n is not None and (not isinstance(top_n, int) or isinstance(top_n, bool) or top_n < 1):
+        raise RulesError("selection.top_n must be a whole number of at least 1 (or empty for no limit)")
+    floor = data.get("floor_rule_points")
+    if floor is not None and not _is_number(floor):
+        raise RulesError("selection.floor_rule_points must be a number of rule points (or empty for no floor)")
+    per = data.get("per", Selection.per)
+    if per not in PERIODS:
+        raise RulesError(f"selection.per must be one of {', '.join(PERIODS)}; got {per!r}")
+    return Selection(top_n=top_n, floor_rule_points=None if floor is None else float(floor), per=per)
 
 
 def load_rules(path: Path | str | None = None) -> RuleSet:

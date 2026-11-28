@@ -13,9 +13,8 @@ from suva.scoring.score import score_record
 from suva.sources.base import SourceRecord
 
 RULES = {
-    "threshold": 50,
     "base": -30,
-    "bands": {"high": 70, "low": 10},
+    "selection": {"top_n": 2, "floor_rule_points": 30, "per": "period"},  # = score 0 with base -30
     "rules": [
         {"id": "suva", "field": "parties", "match": {"any": ["Suva", "CNA"]}, "weight": 40,
          "explanation": "Suva is a party."},
@@ -34,7 +33,8 @@ def rec(key="8C_1/2025@2025-10-02", relevant=False, **fields):
 
 def test_shipped_rules_file_is_valid():
     ruleset = load_rules(DEFAULT_RULES_PATH)
-    assert ruleset.rules and 0 <= ruleset.threshold <= 100
+    assert ruleset.rules and ruleset.selection.top_n >= 1 and ruleset.selection.per in ("month", "week", "period")
+    assert ruleset.judge_floor_rule_points is not None
     assert ruleset.judge.get("rubric")
 
 
@@ -52,18 +52,14 @@ def test_list_rules_match_exact_values():
     assert not ruleset.by_id("uvg").matches(rec(laws=["UVV"]))
 
 
-def test_score_turns_points_into_a_0_100_s_curve_with_bands():
+def test_rule_points_are_the_fired_rules_and_the_display_score_adds_base():
     ruleset = parse_rules(RULES)
     s = score_record(rec(parties="Suva", laws=["UVG"]), ruleset)
-    assert s.points == 25 and s.score == pytest.approx(92.41, abs=0.01) and s.relevant and s.band == "high"
+    assert s.rule_points == 55 and s.display_score == -30 + 55 == 25
     assert [f.id for f in s.fired] == ["suva", "uvg"] and "Suva is a party." in s.explanation
     nothing = score_record(rec(), ruleset)
-    assert nothing.points == -30 and nothing.score == pytest.approx(4.74, abs=0.01) and nothing.band == "low"
-    low = score_record(rec(subject="Krankenversicherung"), ruleset)
-    assert 0 < low.score < nothing.score  # never capped: more negative evidence, lower score
-    middle = score_record(rec(parties="Suva"), ruleset)
-    assert middle.score == pytest.approx(73.11, abs=0.01) and middle.band == "high"
-    assert score_record(rec(laws=["UVG"]), ruleset).band == "check"
+    assert nothing.rule_points == 0 and nothing.display_score == -30 and nothing.explanation == "No rule matched."
+    assert score_record(rec(subject="Krankenversicherung"), ruleset).display_score == -90  # not capped
 
 
 def test_graded_rule_counts_matches_up_to_its_cap():
@@ -72,9 +68,9 @@ def test_graded_rule_counts_matches_up_to_its_cap():
          "explanation": "UVG articles cited."}]})
     rule = ruleset.by_id("uvg_articles")
     assert rule.count(rec(articles=["Art. 6 UVG", "Art. 4 ATSG"])) == 1
-    assert score_record(rec(articles=["Art. 6 UVG", "Art. 4 ATSG"]), ruleset).points == -26
+    assert score_record(rec(articles=["Art. 6 UVG", "Art. 4 ATSG"]), ruleset).display_score == -26
     many = score_record(rec(articles=[f"Art. {i} UVG" for i in range(5)]), ruleset)
-    assert many.points == -20 and "(5×)" in many.explanation  # capped at max 10
+    assert many.display_score == -20 and "(5×)" in many.explanation  # capped at max 10
     assert rule.feature(rec(articles=[f"Art. {i} UVG" for i in range(5)])) == 2.5
     text_rule = parse_rules(RULES | {"rules": [
         {"id": "unfall", "field": "considerations", "match": {"any": ["Unfall"]}, "per_match": 1,
@@ -86,8 +82,8 @@ def test_judge_points_join_the_score():
     ruleset = parse_rules(RULES | {"judge": {"points": {"high": 20, "low": -20}}})
     base = score_record(rec(parties="Suva"), ruleset)
     high = score_record(rec(parties="Suva"), ruleset, judge="high", judge_reason="New case law.")
-    assert high.points == base.points + 20 and "Apertus judge: high (New case law.)" in high.explanation
-    assert score_record(rec(parties="Suva"), ruleset, judge="medium").points == base.points  # no points set
+    assert high.rule_points == base.rule_points + 20 and "Apertus judge: high (New case law.)" in high.explanation
+    assert score_record(rec(parties="Suva"), ruleset, judge="medium").rule_points == base.rule_points  # no points set
 
 
 @pytest.mark.parametrize("broken, message", [
@@ -101,7 +97,16 @@ def test_judge_points_join_the_score():
      "either 'weight'"),
     ({"rules": [{"id": "x", "field": "subject", "match": {"any": ["a"]}, "weight": 1, "max": 3,
                  "explanation": "e"}]}, "'max' only applies"),
-    ({"rules": [], "bands": {"high": 20, "low": 40}}, "bands needs"),
+    ({"rules": [], "bands": {"high": 20, "low": 40}}, "'bands' is no longer used"),
+    ({"rules": [], "threshold": 9}, "'threshold' is no longer used"),
+    ({"rules": [], "scale": 10}, "'scale' is no longer used"),
+    ({"rules": [], "judge": {"candidate_threshold": 5}}, "candidate_floor_rule_points"),
+    ({"rules": [], "judge": {"candidate_floor_points": -29}}, "old value minus base"),
+    ({"rules": [], "selection": {"floor_points": -29}}, "old value minus base"),
+    ({"rules": [], "selection": {"top_n": 0}}, "selection.top_n"),
+    ({"rules": [], "selection": {"per": "day"}}, "selection.per"),
+    ({"rules": [], "selection": {"floor_rule_points": "low"}}, "selection.floor_rule_points"),
+    ({"rules": [], "selection": {"top": 30}}, "selection may only set"),
     ({"rules": [], "judge": {"points": {"great": 5}}}, "judge.points"),
 ])
 def test_invalid_rules_are_rejected_with_a_clear_message(broken, message):
@@ -109,32 +114,34 @@ def test_invalid_rules_are_rejected_with_a_clear_message(broken, message):
         parse_rules(broken)
 
 
-def test_evaluate_counts_precision_recall_and_evidence():
-    ruleset = parse_rules(RULES)
+def test_evaluate_counts_recall_and_precision_of_the_reading_list_and_evidence():
+    ruleset = parse_rules(RULES)  # top 2 of the whole period, none below 0 points
     records = [
-        rec("a@1", True, parties="Suva"),
-        rec("b@1", True, parties="X"),  # missed
-        rec("c@1", False, parties="Suva"),  # false alarm
-        rec("d@1", False, parties="Y"),
+        rec("a@1", True, parties="Suva"),  # +10
+        rec("b@1", True, parties="X"),  # -30: below the floor, missed
+        rec("c@1", False, parties="Suva"),  # +10: false alarm
+        rec("d@1", False, parties="Y"),  # -30
     ]
     ev = evaluate(records, ruleset, "train")
-    m = ev.at_threshold
-    assert (m.true_pos, m.false_pos, m.false_neg) == (1, 1, 1)
-    assert m.precision == 0.5 and m.recall == 0.5
+    sel = ev.selection
+    assert (sel.shown, sel.true_pos, sel.n_rel) == (2, 1, 2)
+    assert sel.precision == 0.5 and sel.recall == 0.5
     assert [c["key"] for c in ev.misses] == ["b@1"] and [c["key"] for c in ev.false_alarms] == ["c@1"]
+    assert ev.misses[0]["score"] == -30 and ev.misses[0]["rule_points"] == 0 and ev.misses[0]["period_rank"] == 4  # tie with d: relevant last
     suva = next(e for e in ev.evidence if e.id == "suva")
     assert suva.text == "fires in 1/2 relevant, 1/2 not relevant"
-    assert ev.bands == {"high": [1, 1], "check": [0, 0], "low": [1, 1]}
+    assert [b.top_n for b in ev.budget] == [1, 2, 3]  # the N sweep around top_n = 2
+    assert "calibration" not in ev.as_dict() and "bands" not in ev.as_dict()
 
 
 def test_ranking_metrics_judge_the_sorted_list():
     from suva.scoring.evaluate import ranking, score_all
 
     ruleset = parse_rules(RULES)
-    records = [rec("a@1", True, parties="Suva", laws=["UVG"]),  # 92.4
-               rec("b@1", False, parties="Suva"),  # 73.1
-               rec("c@1", True, parties="Suva"),  # 73.1, tie with b: counted after b (pessimistic)
-               rec("d@1", False), rec("e@1", True)]  # 4.7 each
+    records = [rec("a@1", True, parties="Suva", laws=["UVG"]),  # +25 points
+               rec("b@1", False, parties="Suva"),  # +10
+               rec("c@1", True, parties="Suva"),  # +10, tie with b: counted after b (pessimistic)
+               rec("d@1", False), rec("e@1", True)]  # -30 each
     rk = ranking(score_all(records, ruleset))
     assert rk.precision_at[10] == 3 / 5
     assert rk.depth_for_recall == {0.9: 5, 0.95: 5, 1.0: 5}
