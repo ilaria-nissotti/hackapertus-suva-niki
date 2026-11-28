@@ -196,18 +196,22 @@ def library_hits(query="", lang=None):
         info = meta.get(row["case_key"])
         if info is None:  # the judgement left the knowledge base
             continue
-        laws = sorted({c.law for c in extract(row["summary"]) if c.kind == "statute" and c.law})
+        # Statutes: laws cited by the judgement or by the approved summary (a summary often cites none).
+        laws = set(info["laws"]) | {c.law for c in extract(row["summary"]) if c.kind == "statute" and c.law}
         hits.append({"key": row["case_key"], "language": row["lang"], "approved_at": row["approved_at"],
-                     "snippet": row["snippet"], "statutes": laws} | info)
+                     "snippet": row["snippet"], "statutes": sorted(laws)}
+                    | {k: v for k, v in info.items() if k != "laws"})
     return hits
 
 
 def library_facets(hits):
-    def count(values):
-        return [{"value": v, "count": n} for v, n in sorted(Counter(values).items(), key=lambda i: (-i[1], i[0]))]
+    def count(values, labels=None):
+        return [{"value": v, "count": n} | ({"label": labels[v]} if labels else {})
+                for v, n in sorted(Counter(values).items(), key=lambda i: (-i[1], i[0]))]
+    topics = {t["id"]: t["explanation"] for hit in hits for t in hit["topics"]}  # shown instead of the rule id
     return {
         "statute": count(law for hit in hits for law in hit["statutes"]),
-        "topic": count(t["id"] for hit in hits for t in hit["topics"]),
+        "topic": count((t["id"] for hit in hits for t in hit["topics"]), topics),
         "outcome": count(o for hit in hits for o in hit["outcome"]),
         "language": count(hit["language"] for hit in hits),
     }

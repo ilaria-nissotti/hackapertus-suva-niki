@@ -135,5 +135,7 @@ def case_metadata(repo, keys, rules_digest=None):
             "publication_date": rec["publication_date"], "status": rec["status"],
             "topics": [{"id": f["id"], "explanation": f["explanation"]} for f in rec["fired"] if f["points"] > 0],
             "outcome": outcome(dispositiv),
+            # Laws the judgement itself cites (stored parse), canonical German abbreviation: UVG, ATSG, IVG …
+            "laws": sorted({c["law"] for c in repo.list_citations(row["key"]) if c["kind"] == "statute" and c["law"]}),
         }
     return out

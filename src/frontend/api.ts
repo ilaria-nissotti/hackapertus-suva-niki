@@ -53,7 +53,7 @@ export function operativeText(decision: string) {
   return (signature < 0 ? parts : parts.slice(0, signature)).join('\n\n');
 }
 
-export type Facet = {value: string; count: number};
+export type Facet = {value: string; count: number; label?: string};
 export type LibraryHit = {
   key: string; docket: string; title: string; language: string; decision_date: string | null;
   approved_at: string; snippet: string; statutes: string[]; outcome: string[];

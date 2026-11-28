@@ -27,10 +27,12 @@ function FacetSelect({label, name, facets, value, names}: {
   label: string; name: string; facets: Facet[]; value: string; names?: Record<string, string>;
 }) {
   return <div className="facet"><label htmlFor={'library-' + name}>{label}</label>
-    <select id={'library-' + name} name={name} defaultValue={value} onChange={event => event.currentTarget.form?.requestSubmit()}>
-      <option value="">All</option>
+    {/* No values yet (no approved summary carries one): say so instead of an empty list. */}
+    <select id={'library-' + name} name={name} defaultValue={value} disabled={!facets.length && !value}
+      onChange={event => event.currentTarget.form?.requestSubmit()}>
+      <option value="">{facets.length || value ? 'All' : 'None yet'}</option>
       {facets.map(facet => <option key={facet.value} value={facet.value}>
-        {(names?.[facet.value] ?? facet.value) + ` (${facet.count})`}</option>)}
+        {(facet.label ?? names?.[facet.value] ?? facet.value) + ` (${facet.count})`}</option>)}
       {value && !facets.some(facet => facet.value === value) && <option value={value}>{names?.[value] ?? value}</option>}
     </select>
   </div>;

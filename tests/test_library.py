@@ -45,3 +45,13 @@ def test_ask_cites_only_retrieved_cases(client, case, monkeypatch):
     none = client.post("/api/library/ask", json={"question": "Mutterschaftsentschädigung?"}).json
     assert none["answer"] is None
     assert client.post("/api/library/ask", json={"question": " "}).status_code == 400
+
+
+def test_statute_facet_includes_laws_the_judgement_cites_and_topics_have_labels(client, case):
+    # The approved text cites no statute; the judgement cites Art. 6 Abs. 1 UVG.
+    assert approve(client, case, add_draft(case, "de"), "Die Beschwerde wird abgewiesen.").status_code == 200
+    body = client.get("/api/library").json
+    assert {"value": "UVG", "count": 1} in body["facets"]["statute"]
+    assert body["hits"][0]["statutes"] == ["UVG"]
+    assert all(topic["label"] and topic["label"] != topic["value"] for topic in body["facets"]["topic"])
+    assert client.get("/api/library", query_string={"statute": "UVG"}).json["total"] == 1
