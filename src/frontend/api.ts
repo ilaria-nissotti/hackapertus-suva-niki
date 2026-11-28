@@ -27,7 +27,11 @@ export function fields(values: Record<string, string>) {
   return form;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** `2026-09-25` -> `25 Sep 2026`: fixed three-letter months (the en-GB locale writes "Sept"). */
 export function displayDate(value: string | null) {
-  return value ? new Intl.DateTimeFormat('en-GB', {dateStyle: 'medium', timeZone: 'UTC'})
-    .format(new Date(value + 'T00:00:00Z')) : 'Unknown';
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return value || 'Unknown';
+  return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
 }

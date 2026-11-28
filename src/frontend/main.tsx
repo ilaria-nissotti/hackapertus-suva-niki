@@ -189,14 +189,16 @@ function App() {
             <form className="filters" key={JSON.stringify([params.get('q'), params.get('status'), params.get('sort')])}
               onSubmit={filter}>
               <input name="q" type="search" aria-label="Search cases" placeholder="Search case or legal issue" defaultValue={params.get('q') ?? ''}/>
-              <select name="status" aria-label="Review status" defaultValue={params.get('status') ?? ''}>
+              <select name="status" aria-label="Review status" defaultValue={params.get('status') ?? ''}
+                onChange={event => event.currentTarget.form?.requestSubmit()}>
                 <option value="">All statuses</option>
                 {statuses.map(status => <option key={status}>{status}</option>)}
               </select>
-              <select name="sort" aria-label="Sort by" defaultValue={params.get('sort') === 'date' ? 'date' : 'score'}>
+              <select name="sort" aria-label="Sort by" defaultValue={params.get('sort') === 'date' ? 'date' : 'score'}
+                onChange={event => event.currentTarget.form?.requestSubmit()}>
                 <option value="score">Highest score</option><option value="date">Newest publication</option>
               </select>
-              <button>Apply</button>
+              <button>Search</button>
             </form>
           </div>
           <div className="table-wrap"><table>
@@ -216,9 +218,12 @@ function App() {
             `No judgments match these filters. ${dashboard.stale} judgments have out-of-date scores and are listed as Stale until they are re-scored.`
             : 'No judgments match these filters.'}</p>}
           {dashboard.total > 30 && <nav className="pagination" aria-label="Queue pages">
+            {dashboard.page > 2 && <a href={link({page: null})} onClick={follow}>First</a>}
             {dashboard.page > 1 && <a href={link({page: String(dashboard.page - 1)})} onClick={follow}>Previous</a>}
             <span>Page {dashboard.page} of {Math.ceil(dashboard.total / 30)}</span>
             {dashboard.page * 30 < dashboard.total && <a href={link({page: String(dashboard.page + 1)})} onClick={follow}>Next</a>}
+            {(dashboard.page + 1) * 30 < dashboard.total &&
+              <a href={link({page: String(Math.ceil(dashboard.total / 30))})} onClick={follow}>Last</a>}
           </nav>}
         </section>
         {selected && <CasePane key={selected.key} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
