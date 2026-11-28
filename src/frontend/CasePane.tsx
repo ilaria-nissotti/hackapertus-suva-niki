@@ -95,7 +95,9 @@ function Relevance({record}: {record: Judgment}) {
   </>;
 }
 
-const ASSESSMENTS = ['Relevant', 'Review', 'Low relevance'];
+const ASSESSMENTS = ['Relevant', 'Not relevant'];
+/** The rules status a reviewer's verdict agrees with ("Review" means the rules were unsure). */
+const AGREES: Record<string, string> = {Relevant: 'Relevant', 'Not relevant': 'Low relevance'};
 
 /** The reviewer's own triage, saved beside the rules score (which it never changes). */
 function Assessment({record}: {record: Judgment}) {
@@ -125,17 +127,17 @@ function Assessment({record}: {record: Judgment}) {
     <h4>Your assessment</h4>
     <p className="muted">Agree or disagree with the rules. Saved for the rules experts; the score stays as it is.</p>
     <fieldset>
-      <legend>Relevance for Suva</legend>
-      {ASSESSMENTS.map(value => <label key={value}>
+      <legend>Relevant for Suva?</legend>
+      <div className="options">{ASSESSMENTS.map(value => <label key={value}>
         <input type="radio" name="assessment" value={value} checked={status === value} required
-          onChange={() => setStatus(value)}/> {value}</label>)}
+          onChange={() => setStatus(value)}/> {value}</label>)}</div>
     </fieldset>
     <label>Reason (optional)
-      <textarea rows={3} maxLength={2000} value={reason} onChange={event => setReason(event.target.value)}/>
+      <Textarea rows={3} maxLength={2000} value={reason} onChange={event => setReason(event.target.value)}/>
     </label>
-    <button disabled={busy || !status}>{saved ? 'Update assessment' : 'Save assessment'}</button>
+    <Button type="submit" variant="outline" disabled={busy || !status}>{saved ? 'Update assessment' : 'Save assessment'}</Button>
     {message && <p role="status">{message}</p>}
-    {saved && !message && <p className="muted">Saved: {saved.status}{saved.status !== record.status &&
+    {saved && !message && <p className="muted">Saved: {saved.status}{AGREES[saved.status] !== record.status &&
       ` (rules: ${record.status})`}.</p>}
   </form>;
 }

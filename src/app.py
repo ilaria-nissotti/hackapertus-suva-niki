@@ -279,7 +279,7 @@ def case_search_route():
     return jsonify(hits=hits, searched=len(records))
 
 
-TRIAGE_STATUSES = ("Relevant", "Review", "Low relevance")
+TRIAGE_STATUSES = ("Relevant", "Not relevant")  # a reviewer's verdict; "Review" is only the rules being unsure
 
 
 @app.post("/api/triage-feedback")
@@ -287,7 +287,7 @@ def save_triage_feedback():
     body = request.get_json(silent=True) or {}
     key, status, reason = body.get("case"), body.get("status"), body.get("reason", "")
     if status not in TRIAGE_STATUSES or not isinstance(reason, str) or len(reason) > 2000:
-        return jsonify(message="Choose Relevant, Review or Low relevance; the reason has at most 2000 characters."), 400
+        return jsonify(message="Choose Relevant or Not relevant; the reason has at most 2000 characters."), 400
     record = load_record(key)
     if record is None:
         return jsonify(message="Judgment not found."), 404
