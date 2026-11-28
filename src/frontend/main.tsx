@@ -1,8 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import type {FormEvent, MouseEvent} from 'react';
 import {createRoot} from 'react-dom/client';
-import {CasePane, Status, statusLabel, views} from './CasePane';
-import type {View} from './CasePane';
+import {CasePane, Status, statusLabel} from './CasePane';
 import {displayDate} from './api';
 import type {Dashboard, Language} from './api';
 import '@fontsource-variable/atkinson-hyperlegible-next';
@@ -27,8 +26,6 @@ function App() {
   const params = new URLSearchParams(url);
   const caseKey = params.get('case');
   const lang: Language = params.get('lang') === 'fr' ? 'fr' : 'de';
-  const view = views.find(value => value === params.get('view')) ??
-    (location.hash === '#case-briefing' ? 'Legal summaries' : 'Overview');
   const selected = dashboard?.selected?.key === caseKey ? dashboard.selected : null;
   const dataParams = new URLSearchParams(url);
   dataParams.delete('view');
@@ -229,8 +226,8 @@ function App() {
               <a href={link({page: String(Math.ceil(dashboard.total / 30))})} onClick={follow}>Last</a>}
           </nav>}
       </section>}
-      {dashboard && selected && <CasePane key={selected.key} record={selected} lang={lang} view={view} audio={dashboard.lang === lang ? dashboard.audio : {}}
-        selectView={value => navigate(link({view: value}))} selectLanguage={value => navigate(link({lang: value}))}
+      {dashboard && selected && <CasePane key={selected.key} record={selected} lang={lang} audio={dashboard.lang === lang ? dashboard.audio : {}}
+        selectLanguage={value => navigate(link({lang: value}))}
         close={close} onClose={follow} action={action} busy={busy}/>}
       {caseKey && !selected && <section className="empty" role="status">{
         loadedQuery === dataQuery ? 'Judgment unavailable.' : error ? 'Judgment could not be loaded.' : 'Loading judgment…'
