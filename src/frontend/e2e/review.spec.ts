@@ -96,8 +96,9 @@ test.describe('keyboard', () => {
 
   test('tab order reaches the search, the filters and the first case', async ({page}) => {
     await open(page, '/');
+    // Tab until the first case: the masthead's section links and reviewer controls come first.
     const reached: string[] = [];
-    for (let i = 0; i < 12; i++) {
+    while (reached.length < 20 && !reached.includes('8C_901/2026')) {
       await page.keyboard.press('Tab');
       reached.push(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')
         ?? document.activeElement?.textContent?.trim() ?? ''));
