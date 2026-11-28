@@ -172,9 +172,13 @@ function App() {
           {dashboard.dates && <span>{displayDate(dashboard.dates[0])} – {displayDate(dashboard.dates[1])}</span>}
           <small>Window: published {displayDate(dashboard.window[0])}–{displayDate(dashboard.window[1])}.
             {dashboard.unknown_publication > 0 && ` ${dashboard.unknown_publication} with unknown publication date included.`}
-            {dashboard.stale > 0 && ` ${dashboard.stale} scores out of date.`} Source coverage may be incomplete.</small>
+            {' '}Source coverage may be incomplete.</small>
         </div>
       </div>}
+      {dashboard && dashboard.stale > 0 && <p className="notice warning" role="status">
+        <strong>{dashboard.stale} of {dashboard.count} scores are out of date</strong>, so they show as Stale and
+        don’t count toward the shortlist. Run <code>python -m suva parse</code>, then <code>python -m suva score</code>,
+        and reload.</p>}
       {notice && <p className="notice" role="status">{notice}</p>}
       {error && <div className="notice" role="alert">{error} <button onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
       {!dashboard && !error && <p role="status">Loading judgments…</p>}
@@ -206,8 +210,11 @@ function App() {
               <td><Status value={row.status}/></td>
             </tr>)}</tbody>
           </table></div>
-          {!dashboard.rows.length && <p className="empty">{dashboard.count ?
-            'No judgments match these filters.' : 'No judgments in the window. Run python -m suva fetch, parse and score.'}</p>}
+          {!dashboard.rows.length && <p className="empty">{!dashboard.count ?
+            'No judgments in the window. Run python -m suva fetch, parse and score.'
+            : dashboard.stale > 0 && params.get('status') && params.get('status') !== 'Stale' ?
+            `No judgments match these filters. ${dashboard.stale} judgments have out-of-date scores and are listed as Stale until they are re-scored.`
+            : 'No judgments match these filters.'}</p>}
           {dashboard.total > 30 && <nav className="pagination" aria-label="Queue pages">
             {dashboard.page > 1 && <a href={link({page: String(dashboard.page - 1)})} onClick={follow}>Previous</a>}
             <span>Page {dashboard.page} of {Math.ceil(dashboard.total / 30)}</span>

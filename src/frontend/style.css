@@ -87,6 +87,7 @@ tr.selected { background: #f7eef1 }
 .pagination { justify-content: center; border-top: 1px solid var(--line); padding: 1rem }
 .empty, .notice { padding: 1rem 1.25rem }
 .notice { margin-bottom: 1rem; background: white; border-left: .25rem solid var(--accent) }
+.notice.warning { background: #fcf0ce; border-left-color: #b07d00; color: #4a3500 }
 .back { display: inline-block; margin-bottom: .95rem; font-size: .875rem }
 .context { color: var(--muted); font-size: .875rem }
 .case-identity h2 { font-size: clamp(1.7rem, 4vw, 2.6rem) }

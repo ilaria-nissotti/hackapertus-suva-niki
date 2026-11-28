@@ -24,8 +24,10 @@ function Relevance({record}: {record: Judgment}) {
     <li key={rule.id}><span className="points">{rule.points > 0 ? '+' : ''}{Math.round(rule.points)}</span> {rule.explanation}</li>)}</ul>;
   if (record.score === null) return <p>Not scored yet. Run <code>python -m suva score</code>.</p>;
   return <>
-    {!record.score_current && <p role="alert">This score is out of date (rules, parse or text changed). Run <code>python -m suva score</code>.</p>}
-    {record.band && <p><strong>{BANDS[record.band]}</strong></p>}
+    {!record.score_current && <p role="alert">This score is out of date (rules, parse or text changed). Run{' '}
+      <code>python -m suva parse</code>, then <code>python -m suva score</code>.</p>}
+    {record.band && (record.score_current ? <p><strong>{BANDS[record.band]}</strong></p>
+      : <p className="muted"><strong>{BANDS[record.band]}</strong> (from the out-of-date score)</p>)}
     {reasons(1).length > 0 && <><h4>Why it was selected</h4>{list(reasons(1))}</>}
     {reasons(-1).length > 0 && <><h4>What counts against it</h4>{list(reasons(-1))}</>}
     {!record.fired.length && <p>No relevance rule matched this judgment.</p>}
