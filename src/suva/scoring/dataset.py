@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from suva.hashing import sha256
+from suva.scoring.derive import with_derived_fields
 from suva.parse.segment import PARSER_VERSION
 from suva.sources.base import parse_iso_date
 from suva.storage.base import Repository
@@ -158,9 +159,10 @@ def load_dataset(path: Path, split: str | None = None) -> list[dict[str, Any]]:
 
 
 def iter_dataset(path: Path) -> Iterator[dict[str, Any]]:
+    """Records of the dataset file, with the derived fields of derive.py added."""
     if not path.exists():
         raise FileNotFoundError(f"{path} not found: run `python -m suva dataset` first")
     with path.open(encoding="utf-8") as f:
         for line in f:
             if line.strip():
-                yield json.loads(line)
+                yield with_derived_fields(json.loads(line))
