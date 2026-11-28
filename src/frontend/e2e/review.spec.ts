@@ -88,6 +88,7 @@ test('overview leads with the decision and keeps score and coverage details on d
   const casePane = page.getByRole('article', {name: SUBJECT});
   await expect(casePane.getByRole('heading', {name: 'Court’s decision'})).toBeVisible();
   await expect(casePane.getByText(/Die Beschwerde wird abgewiesen/).first()).toBeVisible();
+  await expect(casePane.getByText('Read full decision')).toHaveCount(0);
   await expect(page.getByRole('columnheader', {name: 'Score', exact: true})).toHaveCount(0);
   await expect(casePane.getByText('Score 88', {exact: true})).toBeHidden();
   await casePane.getByText('Score details', {exact: true}).click();
@@ -100,6 +101,23 @@ test('overview leads with the decision and keeps score and coverage details on d
   await expect(casePane.getByRole('button', {name: 'Save approved edit'})).toBeHidden();
   await casePane.getByRole('textbox', {name: 'Approved summary'}).fill('Die Beschwerde wird abgewiesen.');
   await expect(casePane.getByRole('button', {name: 'Save approved edit'})).toBeVisible();
+});
+
+test('long decisions show an excerpt until the reviewer expands them', async ({page}) => {
+  await page.route('**/api/dashboard**', async route => {
+    const data = await (await route.fetch()).json();
+    if (data.selected) {
+      data.selected.decision = `${data.selected.decision}\n\n${'Weitere Anordnungen. '.repeat(40)}\n\nLetzte Anordnung.`;
+    }
+    await route.fulfill({json: data});
+  });
+  await open(page, caseUrl(RELEVANT));
+  const casePane = page.getByRole('article', {name: SUBJECT});
+  await expect(casePane.getByText('Decision excerpt', {exact: true})).toBeVisible();
+  await expect(casePane.getByText('Letzte Anordnung.', {exact: true})).toBeHidden();
+  await casePane.getByText('Read full decision', {exact: true}).click();
+  await expect(casePane.getByText('Decision excerpt', {exact: true})).toBeHidden();
+  await expect(casePane.getByText('Letzte Anordnung.', {exact: true})).toBeVisible();
 });
 
 test.describe('screenshots at 1440×900', () => {

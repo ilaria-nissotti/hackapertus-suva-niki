@@ -42,7 +42,11 @@ def judgement_text(docket: str, decided: date, subject: str) -> str:
             f"Gegenstand\n\n{subject}, Beschwerde gegen das Urteil des Versicherungsgerichts des Kantons X.\n\n"
             "Sachverhalt:\n\nA. Die versicherte Person stürzte bei der Arbeit.\n\nErwägungen:\n\n1.\n\n"
             "Gemäss Art. 6 Abs. 1 UVG werden die Versicherungsleistungen bei Berufsunfällen gewährt.\n\n"
-            f"Demnach erkennt das Bundesgericht:\n\n1.\n\n{EVIDENCE}") + " Begründung." * 120
+            "2.\n\nDie ärztlichen Berichte bestätigen den Sturz. Sie stellen jedoch keinen natürlichen "
+            "Kausalzusammenhang zwischen dem Unfall und den fortbestehenden Beschwerden fest. Die übrigen "
+            "Akten enthalten keine zeitnahen Befunde, die eine andere Beurteilung erlauben. Die Vorinstanz "
+            "durfte deshalb auf die vorhandenen Berichte abstellen.\n\n"
+            f"Demnach erkennt das Bundesgericht:\n\n1.\n\n{EVIDENCE}")
 
 
 def closed_port() -> int:

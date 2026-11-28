@@ -45,6 +45,22 @@ function RulingText({text}: {text: string}) {
     <p key={i}><span className="paragraph-number">{block.number}</span>{block.text}</p>)}</div>;
 }
 
+function DecisionPreview({text, language}: {text: string; language: string | null}) {
+  const excerptLimit = 480;
+  const firstLines = text.split('\n', 12).join('\n').trimEnd();
+  const excerpt = firstLines.length <= excerptLimit ? firstLines :
+    firstLines.slice(0, excerptLimit + 1).replace(/\s+\S*$/, '').slice(0, excerptLimit).trimEnd();
+  return <div lang={language ?? undefined} className="decision-preview">
+    {excerpt === text ? <RulingText text={text}/> : <>
+      <div className="decision-excerpt">
+        <p className="muted">Decision excerpt</p>
+        <RulingText text={excerpt + ' …'}/>
+      </div>
+      <Collapsible label="Read full decision"><RulingText text={text}/></Collapsible>
+    </>}
+  </div>;
+}
+
 function Relevance({record}: {record: Judgment}) {
   const leading = record.score_current ? record.fired.filter(rule => rule.points > 0).slice(0, 2) : [];
   const list = (rules: FiredRule[]) => <ul className="reasons">{rules.map(rule =>
@@ -202,7 +218,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
       <div hidden={view !== 'Overview'}>
         <section>
           <h3>Court’s decision</h3>
-          {decision ? <div lang={record.language ?? undefined}><RulingText text={decision}/></div>
+          {decision ? <DecisionPreview text={decision} language={record.language}/>
             : <p className="muted">No decision excerpt available.</p>}
         </section>
         <section>

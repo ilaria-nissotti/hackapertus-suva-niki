@@ -140,6 +140,8 @@ tr.selected, tr.selected:hover { background: var(--sheet); box-shadow: inset 3px
 .case-docket { font-size: .95rem; font-weight: 700; font-variant-numeric: tabular-nums }
 .case-name { margin-top: .55rem; font: 550 clamp(1.55rem, 2.35vw, 2.15rem)/1.22 var(--prose); max-width: 38ch; text-wrap: pretty }
 .official-title { color: var(--muted); font-size: .9375rem }
+.decision-preview > details { margin-top: .75rem }
+.decision-preview:has(> details[open]) > .decision-excerpt { display: none }
 .leading-reasons { margin: .5rem 0 0; padding-inline-start: 1.1rem }
 .leading-reasons li + li { margin-top: .3rem }
 .case-actions {
