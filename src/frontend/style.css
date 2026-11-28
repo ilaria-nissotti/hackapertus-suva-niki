@@ -66,7 +66,10 @@ td { font-size: .9rem }
 td a { font-weight: 750; white-space: nowrap }
 td:nth-child(2) { white-space: nowrap }
 tr.selected { background: #f7eef1 }
-.topic { color: var(--muted); margin-top: .15rem; overflow-wrap: anywhere }
+.topic {
+  color: var(--muted); margin-top: .15rem; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
 .score { font-weight: 700; font-variant-numeric: tabular-nums }
 .status { display: inline-block; border-radius: .3rem; padding: .12rem .43rem; background: #eaf0f6; color: #394f67; font-size: .8125rem; font-weight: 700; white-space: nowrap }
 .status.relevant { color: #245639; background: #e3f2e8 }

@@ -200,7 +200,8 @@ function App() {
             <tbody>{dashboard.rows.map(row => <tr key={row.key} className={row.key === caseKey ? 'selected' : ''}>
               <td><a href={link({case: row.key, view: null})} onClick={follow}
                 aria-current={row.key === caseKey ? 'true' : undefined}>{row.docket}</a>
-                {(row.issue || row.title !== row.docket) && <div className="topic">{row.issue || row.title}</div>}</td>
+                {row.title !== row.docket ? <div className="topic" title={row.issue ?? undefined}>{row.title}</div>
+                  : row.issue && <div className="topic">{row.issue}</div>}</td>
               <td>{row.publication_date ? displayDate(row.publication_date) : 'Unknown'}</td><td className="score">{row.score === null ? '—' : Math.round(row.score)}</td>
               <td><Status value={row.status}/></td>
             </tr>)}</tbody>
