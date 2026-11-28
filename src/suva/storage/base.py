@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from suva.sources.base import SourceRecord
+    from suva.windows import Window
 
 
 @dataclass(frozen=True)
@@ -80,8 +81,9 @@ class Repository(ABC):
     @abstractmethod
     def list_judgements(
         self, start: str | None = None, end: str | None = None, dockets: set[str] | None = None,
+        *, window: Window | None = None,
     ) -> list[dict[str, Any]]:
-        """Judgements by decision-date range and/or docket, without the text column."""
+        """Judgements by window or decision-date range, optionally filtered by docket, without text."""
 
     @abstractmethod
     def judgement_sources(self, key: str) -> list[dict[str, Any]]: ...
@@ -116,7 +118,8 @@ class Repository(ABC):
 
     @abstractmethod
     def list_review_rows(self, start: str | None = None, end: str | None = None,
-                         keys: list[str] | None = None, *, include_text: bool = False) -> list[dict[str, Any]]:
+                         keys: list[str] | None = None, *, include_text: bool = False,
+                         window: Window | None = None) -> list[dict[str, Any]]:
         """Judgements with parse subject, stored score and optional full text."""
 
     @abstractmethod

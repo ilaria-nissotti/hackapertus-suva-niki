@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from datetime import date
 from typing import Any
 
 from suva.hashing import sha256
@@ -51,12 +50,8 @@ def text_hash(text: str | None) -> str | None:
 
 
 def window_judgements(repo: Repository, window: Window) -> list[dict[str, Any]]:
-    """Judgements decided in the window whose publication date is in it or unknown."""
-    rows = repo.list_judgements(start=window.start.isoformat(), end=window.end.isoformat())
-    if window.published_from is None:
-        return rows
-    return [r for r in rows if window.includes_publication(
-        date.fromisoformat(r["publication_date"]) if r["publication_date"] else None)]
+    """Use publication dates in the challenge window when available."""
+    return repo.list_judgements(window=window)
 
 
 def score_window(repo: Repository, window: Window, ruleset: RuleSet) -> ScoreRunReport:

@@ -15,10 +15,30 @@ from suva.sources.quality import usable_text
 from suva.sources.base import decision_id
 from suva.storage.base import AuditEntry, Repository
 from suva.storage.migrations import MIGRATIONS
+from suva.windows import Window
 
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _date_filter(start: str | None, end: str | None, window: Window | None) -> tuple[str, list[str]]:
+    if window is not None:
+        start, end = window.start.isoformat(), window.end.isoformat()
+        if window.published_from is not None:
+            return (
+                " AND (j.publication_date BETWEEN ? AND ?"
+                " OR (j.publication_date IS NULL AND j.decision_date BETWEEN ? AND ?))",
+                [window.published_from.isoformat(), end, start, end],
+            )
+    sql, args = "", []
+    if start:
+        sql += " AND j.decision_date >= ?"
+        args.append(start)
+    if end:
+        sql += " AND j.decision_date <= ?"
+        args.append(end)
+    return sql, args
 
 
 class SQLiteRepository(Repository):
@@ -265,17 +285,12 @@ class SQLiteRepository(Repository):
         row = self.conn.execute("SELECT * FROM judgements WHERE key = ?", (key,)).fetchone()
         return dict(row) if row else None
 
-    def list_judgements(self, start=None, end=None, dockets=None) -> list[dict[str, Any]]:
+    def list_judgements(self, start=None, end=None, dockets=None, *, window=None) -> list[dict[str, Any]]:
         cols = ("key, docket, decision_date, chamber_prefix, language, publication_date,"
                 " publication_date_source, text_source, length(text) AS text_length, html_path,"
                 " first_seen_at")
-        sql, args = f"SELECT {cols} FROM judgements WHERE 1=1", []
-        if start:
-            sql += " AND decision_date >= ?"
-            args.append(start)
-        if end:
-            sql += " AND decision_date <= ?"
-            args.append(end)
+        date_sql, args = _date_filter(start, end, window)
+        sql = f"SELECT {cols} FROM judgements j WHERE 1=1" + date_sql
         rows = [dict(r) for r in self.conn.execute(sql + " ORDER BY decision_date, docket", args)]
         if dockets is not None:
             rows = [r for r in rows if r["docket"] in dockets]
@@ -357,7 +372,7 @@ class SQLiteRepository(Repository):
     def list_scores(self) -> list[dict[str, Any]]:
         return [self._score_row(r) for r in self.conn.execute("SELECT * FROM relevance_scores ORDER BY score DESC, points DESC")]
 
-    def list_review_rows(self, start=None, end=None, keys=None, *, include_text=False) -> list[dict[str, Any]]:
+    def list_review_rows(self, start=None, end=None, keys=None, *, include_text=False, window=None) -> list[dict[str, Any]]:
         sql = ("SELECT j.key, j.docket, j.decision_date, j.publication_date, j.publication_date_source,"
                f" j.language, {'j.text' if include_text else 'NULL'} AS text,"
                " p.subject, p.parsed_at, p.text_hash AS parse_text_hash, p.parser_version,"
@@ -365,13 +380,8 @@ class SQLiteRepository(Repository):
                " s.parser_version AS score_parser_version, s.text_hash AS score_text_hash"
                " FROM judgements j LEFT JOIN parses p ON p.key = j.key"
                " LEFT JOIN relevance_scores s ON s.key = j.key WHERE 1=1")
-        args: list[Any] = []
-        if start:
-            sql += " AND j.decision_date >= ?"
-            args.append(start)
-        if end:
-            sql += " AND j.decision_date <= ?"
-            args.append(end)
+        date_sql, args = _date_filter(start, end, window)
+        sql += date_sql
         if keys is not None:
             if not keys:
                 return []

@@ -276,3 +276,30 @@ def test_a_decision_with_no_known_date_anywhere_is_still_an_unknown_date_sightin
     rep = fetch(repo, tmp_path / "raw", challenge_window(CHALLENGE_TODAY),
                 client=es_client([es_hit("8C_8/2026", "2026-09-01")], []))
     assert rep.sightings["8C_8/2026@2026-09-01"]["publication_date"] is None and rep.publication_unknown == 1
+
+
+def test_challenge_fetch_score_and_review_share_publication_membership(tmp_path, repo):
+    window = Window("challenge", date(2026, 6, 14), date(2026, 11, 28), date(2026, 8, 28))
+    raw = tmp_path / "raw"
+    write_parquet(raw, [
+        ("8C_1/2026", "2026-05-01", "2026-08-28", SUVA_CASE),
+        ("8C_2/2026", "2026-07-01", None, SUVA_CASE),
+        ("8C_3/2026", "2026-05-01", None, SUVA_CASE),
+        ("8C_4/2026", "2026-07-01", "2026-08-27", SUVA_CASE),
+    ])
+    expected = {"8C_1/2026@2026-05-01", "8C_2/2026@2026-07-01"}
+    report = fetch(repo, raw, window, use_entscheidsuche=False)
+    assert report.errors == []
+    assert set(report.sightings) == expected
+
+    # Scoring and review also filter cases already in the KB from earlier runs.
+    repo.upsert_judgement(SourceRecord("manual", "old", "8C_3/2026", date(2026, 5, 1), text=SUVA_CASE))
+    repo.upsert_judgement(SourceRecord("manual", "early", "8C_4/2026", date(2026, 7, 1),
+                                       publication_date=date(2026, 8, 27), text=SUVA_CASE))
+    parse_all(repo)
+    rules = load_rules()
+    assert score_window(repo, window, rules).scored == 2
+    assert {row["key"] for row in repo.list_scores()} == expected
+    records = review_kb.window_records(repo, window, rules_digest=rules_hash(rules))
+    assert {record["key"] for record in records} == expected
+    assert all(record["score_current"] for record in records)

@@ -82,7 +82,14 @@ class _FetchRun:
             picks_requested=len(self.labels),
         )
 
-    def record(self, rec: SourceRecord, *, in_window: bool) -> None:
+    def record(self, rec: SourceRecord, *, in_window: bool) -> bool:
+        if rec.source == entscheidsuche.SOURCE and (
+            not isinstance(rec.source_id, str) or
+            (rec.html_url is not None and not isinstance(rec.html_url, str))
+        ):
+            self.report.errors.append(f"entscheidsuche metadata {rec.key}: invalid source ID or attachment URL")
+            log.warning("fetch_invalid_metadata source=entscheidsuche key=%s", rec.key)
+            return False
         self.report.new_judgements += self.repo.upsert_judgement(rec)
         seen = self.decisions.setdefault(rec.key, _Decision(rec.docket, rec.decision_date, rec.publication_date))
         seen.publication = rec.publication_date or seen.publication
@@ -91,6 +98,7 @@ class _FetchRun:
         if rec.html_url and rec.source == entscheidsuche.SOURCE:
             seen.attachment = rec
         seen.has_text |= bool(usable_text(rec.text))
+        return True
 
     def collect_opencaselaw(self, raw_dir: Path, refresh: bool) -> dict[str, date]:
         window = self.window
@@ -127,8 +135,8 @@ class _FetchRun:
                                  or self.stored_publication.get(rec.key))
                     in_window = window.includes_publication(published)
                     if in_window or rec.docket in self.dockets:
-                        self.record(rec, in_window=in_window)
-                        if published:
+                        recorded = self.record(rec, in_window=in_window)
+                        if recorded and published:
                             self.decisions[rec.key].publication = published
                 progress["ranges"].append([start.isoformat(), end.isoformat()])
 

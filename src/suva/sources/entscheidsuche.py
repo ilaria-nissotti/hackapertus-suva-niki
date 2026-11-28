@@ -111,11 +111,13 @@ def list_bger(client: PoliteClient, start: date, end: date, size: int = PAGE_SIZ
 
 def load_judgement(client: PoliteClient, rec: SourceRecord, cache_dir: Path) -> JudgementDocument:
     """Load the text and local HTML path, refreshing a missing or invalid cache entry."""
-    url = urlsplit(rec.html_url or "")
+    if not isinstance(rec.source_id, str) or not SAFE_ID.fullmatch(rec.source_id):
+        raise ValueError(f"Unsafe source ID: {rec.source_id!r}")
+    if not isinstance(rec.html_url, str):
+        raise ValueError(f"{rec.docket}: expected an HTTPS entscheidsuche attachment URL")
+    url = urlsplit(rec.html_url)
     if (url.scheme, url.netloc) != ("https", "entscheidsuche.ch"):
         raise ValueError(f"{rec.docket}: expected an HTTPS entscheidsuche attachment URL")
-    if not SAFE_ID.fullmatch(rec.source_id):
-        raise ValueError(f"Unsafe source ID: {rec.source_id!r}")
     path = cache_dir / f"{rec.source_id}.html"
     try:
         return JudgementDocument(path, _judgement_text(path.read_text(encoding="utf-8"), rec))

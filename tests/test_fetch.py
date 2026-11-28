@@ -253,3 +253,20 @@ def test_attachment_refusal_preserves_listings_and_stops_attachment_fetches(tmp_
     assert report.entscheidsuche == 2
     assert report.still_without_text == ["8C_2/2025@2025-10-02", "8C_3/2025@2025-10-02"]
     assert report.source_runs["entscheidsuche"]["status"] == "blocked"
+
+
+def test_invalid_attachment_metadata_does_not_stop_later_attachments(tmp_path, repo):
+    raw = tmp_path / "raw"
+    parquet(raw, [("8C_1/2025", "2025-10-02")])
+    bad_day, bad_hit = es_hit("8C_2/2025", "2025-10-03")
+    bad_hit["_id"] = 123
+    html_calls = []
+    client = es_client([(bad_day, bad_hit), es_hit("8C_3/2025", "2025-10-04")], html_calls)
+    window = Window("dev", date(2025, 10, 1), date(2025, 10, 7))
+
+    report = fetch(repo, raw, window, client=client)
+
+    assert report.errors == ["entscheidsuche metadata 8C_2/2025@2025-10-03: invalid source ID or attachment URL"]
+    assert report.text_fallback == ["8C_3/2025@2025-10-04"]
+    assert len(html_calls) == 1
+    assert repo.get_judgement("8C_3/2025@2025-10-04")["text_source"] == "entscheidsuche"

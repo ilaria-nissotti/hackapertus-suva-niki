@@ -62,9 +62,7 @@ def record(row, rules_digest):
 def window_records(repo, window: Window, extra_keys=(), rules_digest=None):
     """Judgements in the window (publication date in it or unknown) plus cases added by hand."""
     digest = rules_digest or current_rules_hash()
-    rows = repo.list_review_rows(start=window.start.isoformat(), end=window.end.isoformat())
-    rows = [r for r in rows if window.includes_publication(
-        date.fromisoformat(r["publication_date"]) if r["publication_date"] else None)]
+    rows = repo.list_review_rows(window=window)
     seen = {r["key"] for r in rows}
     rows += repo.list_review_rows(keys=[k for k in extra_keys if k not in seen])
     return [record(r, digest) for r in rows]
