@@ -98,7 +98,6 @@ def test_triage_records_reviewer_reason_without_replacing_rule_score(client, cas
     assert selected["triage_feedback"]["reason"] == feedback["reason"]
 
 
-@pending
 @pytest.mark.parametrize("format", ["html", "docx", "pdf"])
 def test_export_uses_only_approved_bilingual_text(client, case, format):
     de_version = add_draft(case, "de", "Entwurfskennung")

@@ -299,6 +299,30 @@ def save_triage_feedback():
     return jsonify(case=key, triage_feedback=saved, message="Assessment saved.")
 
 
+@app.get("/api/export")
+def export_summary():
+    import export
+
+    fmt = request.args.get("format", "html")
+    if fmt not in export.FORMATS:
+        return jsonify(message="Choose html, docx or pdf."), 400
+    record = load_record(request.args.get("case"))
+    if record is None:
+        return jsonify(message="Judgment not found."), 404
+    config = jobs.current_config()
+    with closing(connect()) as db:
+        approved = {lang: (jobs.get_result(db, record, lang, config) or {"approved": None})["approved"]
+                    for lang in ("de", "fr")}
+    missing = [lang.upper() for lang, text in approved.items() if not text]
+    if missing:
+        return jsonify(message=f"Approve the {' and '.join(missing)} summary before exporting."), 409
+    doc = export.document(record, approved["de"], approved["fr"])
+    response = send_file(BytesIO(export.RENDER[fmt](doc)), mimetype=export.FORMATS[fmt],
+                         as_attachment=fmt != "html", download_name=export.filename(record["docket"], fmt))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 def prepare_briefing(key, lang):
     config = model_config()
     record = load_record(key)

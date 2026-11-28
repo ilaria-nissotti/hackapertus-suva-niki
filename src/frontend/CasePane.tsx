@@ -197,6 +197,12 @@ function Summary({record, lang, audio, action, busy, visible}: {
           <li key={item.found}>“{item.found}” is the other language’s term; Suva uses “{item.expected}”.</li>)}</ul>
       </div>}
       <Evidence label="Supporting passages for the draft" passages={result.data.quotes}/>
+      {record.de.approved && record.fr.approved ? <p className="export">Export approved DE/FR summary:{' '}
+        {([['html', 'HTML'], ['docx', 'Word'], ['pdf', 'PDF']] as const).map(([format, label], i) => <span key={format}>
+          {i > 0 && ' · '}<a href={'/api/export?' + new URLSearchParams({case: record.key, format})}
+            {...(format === 'html' ? {target: '_blank', rel: 'noopener'} : {download: true})}>{label}</a></span>)}
+      </p> : (record.de.approved || record.fr.approved) &&
+        <p className="muted">Approve both languages to export the summary (HTML, Word, PDF).</p>}
     </section>
     {result.approved && <section className="briefing" id="case-briefing">
       <h3>Audio briefing</h3>
