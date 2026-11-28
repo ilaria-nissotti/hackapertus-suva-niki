@@ -57,6 +57,7 @@ function App({reviewer}: {reviewer: Reviewer}) {
   const [loadedQuery, setLoadedQuery] = useState<string>();
   const [refresh, setRefresh] = useState(0);
   const [error, setError] = useState('');
+  const [rangeError, setRangeError] = useState('');
   const [notice, setNotice] = useState(() => new URLSearchParams(location.search).get('message') ?? '');
   const [busy, setBusy] = useState(false);
   const [addError, setAddError] = useState('');
@@ -65,6 +66,7 @@ function App({reviewer}: {reviewer: Reviewer}) {
   const context = useRef(location.search);
   const actionLock = useRef(false);
   const params = new URLSearchParams(url);
+  const customRange = params.has('published_from') || params.has('published_to');
   const caseKey = params.get('case');
   const screen = ['library', 'precedents', 'weights'].find(value => value === params.get('screen')) ?? 'queue';
   const lang: Language = params.get('lang') === 'fr' ? 'fr' : 'de';
@@ -124,6 +126,7 @@ function App({reviewer}: {reviewer: Reviewer}) {
     context.current = location.search;
     setUrl(location.search);
     setError('');
+    setRangeError('');
     setNotice('');
   }
 
@@ -138,6 +141,7 @@ function App({reviewer}: {reviewer: Reviewer}) {
       context.current = location.search;
       setUrl(location.search);
       setError('');
+      setRangeError('');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -159,6 +163,11 @@ function App({reviewer}: {reviewer: Reviewer}) {
     async function load() {
       try {
         const response = await fetch('/api/dashboard?' + queueQuery, {signal: abort.signal});
+        if (response.status === 400) {
+          const {message} = await response.json();
+          if (!abort.signal.aborted) setError(message || 'Could not apply the publication dates.');
+          return;
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data: Dashboard = await response.json();
         if (abort.signal.aborted) return;
@@ -221,6 +230,22 @@ function App({reviewer}: {reviewer: Reviewer}) {
       sort: String(values.get('sort')), page: null}));
   }
 
+  function applyPublicationRange(first: string | null, last: string | null) {
+    navigate(link({published_from: first, published_to: last, case: null, view: null, page: null}));
+  }
+
+  function filterPublication(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const dates = new FormData(event.currentTarget);
+    const first = String(dates.get('published_from'));
+    const last = String(dates.get('published_to'));
+    if (first > last) {
+      setRangeError('The first publication date must be on or before the last.');
+      return;
+    }
+    applyPublicationRange(first, last);
+  }
+
   const close = link({case: null, view: null});
   return <>
     <header className="masthead">
@@ -261,19 +286,35 @@ function App({reviewer}: {reviewer: Reviewer}) {
         </form>
       </dialog>
       {dashboard && <div className="coverage">
-        <p><strong>{count.format(dashboard.count)} judgments</strong> · {count.format(dashboard.shortlist)} shortlisted
+        <p aria-live="polite"><strong>{count.format(dashboard.count)} judgments</strong> · {count.format(dashboard.shortlist)} shortlisted
           {dashboard.count > dashboard.scored && ` · ${count.format(dashboard.count - dashboard.scored)} unscored`}
         </p>
         <Collapsible label="Coverage">
-          <p>Publication window: {displayDate(dashboard.window[0])}–{displayDate(dashboard.window[1])}</p>
+          <p id="publication-date-format">Enter dates as YYYY-MM-DD.</p>
+          <form className="publication-filter" key={dashboard.window.join('/')} onSubmit={filterPublication}>
+            <label>Published from
+              <Input name="published_from" type="text" defaultValue={dashboard.window[0]} size={12}
+                pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" aria-describedby="publication-date-format" required/>
+            </label>
+            <label>Published through
+              <Input name="published_to" type="text" defaultValue={dashboard.window[1]} size={12}
+                pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" aria-describedby="publication-date-format" required/>
+            </label>
+            <Button type="submit" variant="outline">Apply dates</Button>
+            {customRange && <Button variant="ghost" onClick={() => applyPublicationRange(null, null)}>Reset dates</Button>}
+          </form>
+          {rangeError && <p role="alert">{rangeError}</p>}
           {dashboard.dates && <p>Dates found: {displayDate(dashboard.dates[0])}–{displayDate(dashboard.dates[1])}</p>}
           {dashboard.unknown_publication > 0 && <p>{count.format(dashboard.unknown_publication)} cases have no publication date.</p>}
+          {customRange && <p>Custom ranges show imported judgments with known publication dates.</p>}
           <p>Source coverage may be incomplete.</p>
         </Collapsible>
       </div>}
       {dashboard && dashboard.stale > 0 && <Collapsible className="notice warning"
         label={`${count.format(dashboard.stale)} scores are out of date`}>
-        <p>Stale cases are excluded from the shortlist. Run <code>python -m suva parse</code> and <code>python -m suva score</code>, then reload.</p>
+        <p>Stale cases are excluded from the shortlist. Run <code>python -m suva parse</code> and{' '}
+          <code>python -m suva score{customRange && ` --published-from ${dashboard.window[0]} --published-to ${dashboard.window[1]}`}</code>,
+          then reload.</p>
       </Collapsible>}
       {dashboard?.rescoring && <p className="notice" role="status">Rescoring the queue with the new rule weights…</p>}
       {dashboard && !dashboard.rescoring && dashboard.feedback.new >= dashboard.feedback.threshold &&
@@ -282,7 +323,10 @@ function App({reviewer}: {reviewer: Reviewer}) {
           <a href="/?screen=weights" onClick={follow}>Review updated rule weights</a>
         </p>}
       {notice && <p className="notice" role="status">{notice}</p>}
-      {error && <div className="notice" role="alert">{error} <button onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
+      {error && <div className="notice" role="alert">{error}{' '}
+        <Button onClick={() => setRefresh(value => value + 1)}>Retry</Button>{' '}
+        {customRange && <Button variant="ghost" onClick={() => applyPublicationRange(null, null)}>Reset dates</Button>}
+      </div>}
       {!dashboard && !error && <p role="status">Loading judgments…</p>}
       {dashboard && <div className={'workspace' + (displayed ? ' has-case' : '')}>
         <section className="panel queue" aria-labelledby="queue-title">
@@ -319,7 +363,8 @@ function App({reviewer}: {reviewer: Reviewer}) {
             </tr>)}</tbody>
           </table></div>
           {!dashboard.rows.length && <p className="empty">{dashboard.count
-            ? 'No judgments match these filters.' : 'No judgments in this window.'}</p>}
+            ? 'No judgments match these filters.'
+            : customRange ? 'No imported judgments match these publication dates.' : 'No judgments in this window.'}</p>}
           {dashboard.total > 30 && <nav className="pagination" aria-label="Queue pages">
             {dashboard.page > 2 && <a href={link({page: null})} onClick={follow}>First</a>}
             {dashboard.page > 1 && <a href={link({page: String(dashboard.page - 1)})} onClick={follow}>Previous</a>}

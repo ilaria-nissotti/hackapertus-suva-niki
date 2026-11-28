@@ -116,6 +116,16 @@ replays cached Apertus calls without network access (frozen snapshot mode); ever
 LLM call is recorded in the append-only `audit_log` table (model, host, prompt
 version, input/output hashes — no prompt text, no keys).
 
+Open **Coverage** in the review queue to filter imported judgments by their
+known publication dates. Type the dates as `YYYY-MM-DD`. The filter includes
+both endpoints and keeps the range in the URL. To load and score a historical
+period, pass the same dates to both commands.
+
+```bash
+python -m suva fetch --published-from 2026-04-01 --published-to 2026-06-30 --no-picks
+python -m suva parse
+python -m suva score --published-from 2026-04-01 --published-to 2026-06-30
+```
 
 To import the supplied summaries and picked-judgement workbooks, run
 `python -m suva import-supplied`. Each successful import replaces the supplied

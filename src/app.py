@@ -34,6 +34,7 @@ from bger import ROOT, model_config
 from jobs import connect, kb, load_record, window
 from suva.config import configure_logging, load_settings
 from suva.sources.base import DOCKET_RE
+from suva.windows import publication_window
 
 PAGE = 30
 _settings = load_settings()
@@ -232,8 +233,17 @@ def dashboard_data():
     lang = "fr" if request.args.get("lang") == "fr" else "de"
     selected_key = request.args.get("case")
     current = window()
+    first, last = request.args.get("published_from"), request.args.get("published_to")
+    if first is not None or last is not None:
+        try:
+            start, end = valid_date(first), valid_date(last)
+            if start is None or end is None:
+                raise ValueError("Enter both publication dates.")
+            current = publication_window(start, end)
+        except ValueError as exc:
+            return jsonify(message=str(exc)), 400
     with closing(connect()) as db:
-        extra = review_store.added_cases(db)
+        extra = review_store.added_cases(db) if current.include_unknown_publication else ()
         with closing(kb()) as repo:
             digest = review_kb.current_rules_hash()
             # Concurrent SQLite row scans contend heavily in the Python driver.

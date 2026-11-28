@@ -67,11 +67,14 @@ def build(work: Path, llm_base_url: str) -> None:
     import jobs
     import review_kb
     import review_store
+    from suva.sources.base import SourceRecord
 
     kb_path = work / "kb.sqlite"
     keys = [seed_kb(kb_path, docket, judgement_text(docket, decided, subject), decided, score, band)
             for docket, decided, subject, score, band in CASES]
     with closing(review_kb.open_kb(kb_path)) as repo:
+        repo.upsert_judgement(SourceRecord("opencaselaw", "historical", "8C_905/2026", date(2026, 3, 1),
+                                           publication_date=date(2026, 6, 30)))
         record = review_kb.get_record(repo, keys[0])
     version = jobs.generation_version(record, {"LLM_NAME": MODEL, "LLM_BASE_URL": llm_base_url})
     with closing(review_store.connect(work / "review.sqlite")) as db:

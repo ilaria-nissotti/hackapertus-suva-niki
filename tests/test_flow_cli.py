@@ -86,6 +86,21 @@ def test_score_with_custom_rules_file(settings, tmp_path, capsys):
     assert str(path) in capsys.readouterr().out
 
 
+def test_score_custom_publication_range(settings, capsys):
+    repo = kb(settings)
+    dated = SourceRecord("opencaselaw", "one", "8C_1/2026", date(2026, 3, 10),
+                         publication_date=date(2026, 6, 30), text=SUVA_CASE)
+    undated = SourceRecord("opencaselaw", "two", "8C_2/2026", date(2026, 5, 10), text=SUVA_CASE)
+    repo.upsert_judgement(dated)
+    repo.upsert_judgement(undated)
+    parse_all(repo)
+    repo.close()
+
+    assert cli.main(["score", "--published-from", "2026-04-01", "--published-to", "2026-06-30"]) == 0
+    out = capsys.readouterr().out
+    assert '"scored": 1' in out and dated.key in out and undated.key not in out
+
+
 def test_bad_today_date_raises_value_error(settings):
     # Not an argparse error: an invalid --today escapes as a traceback.
     with pytest.raises(ValueError):

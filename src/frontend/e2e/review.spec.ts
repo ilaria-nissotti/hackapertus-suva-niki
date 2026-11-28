@@ -127,14 +127,32 @@ test('overview leads with the decision and keeps score and coverage details on d
   await expect(casePane.getByText('Score 88', {exact: true})).toBeHidden();
   await casePane.getByText('Score details', {exact: true}).click();
   await expect(casePane.getByText('Score 88', {exact: true})).toBeVisible();
-  await expect(page.getByText(/Publication window:/)).toBeHidden();
+  await expect(page.getByLabel('Published from')).toBeHidden();
   await page.getByText('Coverage', {exact: true}).click();
-  await expect(page.getByText(/Publication window:/)).toBeVisible();
+  await expect(page.getByLabel('Published from')).toBeVisible();
   await casePane.getByRole('button', {name: 'Open summary'}).click();
   await expect(casePane.getByRole('textbox', {name: 'Approved summary'})).toBeVisible();
   await expect(casePane.getByRole('button', {name: 'Save approved edit'})).toBeHidden();
   await casePane.getByRole('textbox', {name: 'Approved summary'}).fill('Die Beschwerde wird abgewiesen.');
   await expect(casePane.getByRole('button', {name: 'Save approved edit'})).toBeVisible();
+});
+
+test('editing Coverage filters the queue by publication date and can be reset', async ({page}) => {
+  await open(page, '/');
+  await page.getByText('Coverage', {exact: true}).click();
+  await page.getByRole('textbox', {name: 'Published from'}).fill('2026-04-01');
+  await page.getByRole('textbox', {name: 'Published through'}).fill('2026-06-30');
+  await page.getByRole('button', {name: 'Apply dates'}).click();
+  await expect(page.getByRole('link', {name: '8C_905/2026'})).toBeVisible();
+  await expect(page.getByRole('link', {name: '8C_901/2026'})).toHaveCount(0);
+  await expect(page.getByText('Dates found: 30 Jun 2026–30 Jun 2026')).toBeVisible();
+  await expectAccessible(page);
+  await page.reload();
+  await expect(page.getByRole('link', {name: '8C_905/2026'})).toBeVisible();
+  await page.getByText('Coverage', {exact: true}).click();
+  await page.getByRole('button', {name: 'Reset dates'}).click();
+  await expect(page.getByRole('link', {name: '8C_901/2026'})).toBeVisible();
+  await expect(page.getByRole('link', {name: '8C_905/2026'})).toHaveCount(0);
 });
 
 test('long decisions show an excerpt until the reviewer expands them', async ({page}) => {

@@ -26,10 +26,13 @@ def _date_filter(start: str | None, end: str | None, window: Window | None) -> t
     if window is not None:
         start, end = window.start.isoformat(), window.end.isoformat()
         if window.published_from is not None:
+            first = window.published_from.isoformat()
+            if not window.include_unknown_publication:
+                return " AND j.publication_date BETWEEN ? AND ?", [first, end]
             return (
                 " AND (j.publication_date BETWEEN ? AND ?"
                 " OR (j.publication_date IS NULL AND j.decision_date BETWEEN ? AND ?))",
-                [window.published_from.isoformat(), end, start, end],
+                [first, end, start, end],
             )
     sql, args = "", []
     if start:

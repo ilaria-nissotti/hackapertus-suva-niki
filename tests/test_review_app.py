@@ -42,6 +42,36 @@ def test_queue_shows_window_cases_with_rules_score_and_reasons(client, tmp_path)
     assert page(client, q="unfallversicherung")["total"] == 1  # search covers the subject
 
 
+def test_custom_publication_range_uses_known_dates_inclusively(client, tmp_path):
+    repo = SQLiteRepository(tmp_path / "kb.sqlite")
+    repo.migrate()
+    for number, decided, published in (
+        (1, date(2026, 1, 10), date(2026, 4, 1)),
+        (2, date(2026, 6, 10), date(2026, 6, 30)),
+        (3, date(2026, 6, 10), date(2026, 7, 1)),
+        (4, date(2026, 6, 10), None),
+    ):
+        docket = f"8C_{number}/2026"
+        repo.upsert_judgement(SourceRecord("opencaselaw", docket, docket, decided, publication_date=published))
+    repo.close()
+
+    data = page(client, published_from="2026-04-01", published_to="2026-06-30", sort="date")
+    assert [row["docket"] for row in data["rows"]] == ["8C_2/2026", "8C_1/2026"]
+    assert data["count"] == 2 and data["unknown_publication"] == 0
+    assert data["window"] == data["dates"] == ["2026-04-01", "2026-06-30"]
+    assert page(client)["count"] == 0
+
+
+@pytest.mark.parametrize("query", [
+    {"published_from": "2026-04-01"},
+    {"published_from": "2026-04-31", "published_to": "2026-06-30"},
+    {"published_from": "2026-06-30", "published_to": "2026-04-01"},
+])
+def test_custom_publication_range_rejects_invalid_dates(client, query):
+    response = client.get("/api/dashboard", query_string=query)
+    assert response.status_code == 400 and response.json["message"]
+
+
 def test_score_becomes_stale_when_the_rules_change(client, tmp_path):
     key = seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", SUVA_CASE)
     with patch("review_kb.current_rules_hash", return_value="other-rules"):

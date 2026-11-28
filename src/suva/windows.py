@@ -15,14 +15,19 @@ class Window:
     name: str
     start: date  # inclusive, by decision date
     end: date  # inclusive
-    published_from: date | None = None  # the real "last 3 months" boundary
+    published_from: date | None = None
+    include_unknown_publication: bool = True
 
     def __post_init__(self) -> None:
         if self.start > self.end:
             raise ValueError("Window start must be on or before its end")
 
     def includes_publication(self, published: date | None) -> bool:
-        return self.published_from is None or published is None or self.published_from <= published <= self.end
+        if self.published_from is None:
+            return True
+        if published is None:
+            return self.include_unknown_publication
+        return self.published_from <= published <= self.end
 
     def __str__(self) -> str:
         return f"{self.name}: decisions {self.start} .. {self.end}"
@@ -36,6 +41,14 @@ def months_back(d: date, months: int) -> date:
 
 def dev_window() -> Window:
     return Window("dev", DEV_START, DEV_END)
+
+
+def publication_window(first: date, last: date) -> Window:
+    """An inclusive publication range, with a wider discovery range for source queries."""
+    if first > last:
+        raise ValueError("The first publication date must be on or before the last.")
+    start = date.fromordinal(max(1, first.toordinal() - WIDEN_DAYS))
+    return Window("publication", start, last, first, include_unknown_publication=False)
 
 
 def challenge_window(today: date, months: int = 3, widen_days: int = WIDEN_DAYS) -> Window:

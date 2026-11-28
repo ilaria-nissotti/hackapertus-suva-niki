@@ -7,6 +7,7 @@ import json
 import sys
 from contextlib import closing
 from dataclasses import asdict, replace
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -56,18 +57,14 @@ def cmd_split_examples(args: argparse.Namespace) -> int:
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
-    from datetime import date
-
     from suva.fetch import fetch
-    from suva.windows import Window, challenge_window, dev_window
+    from suva.windows import Window
 
     settings = load_settings()
     if args.start and args.end:
         window = Window("custom", date.fromisoformat(args.start), date.fromisoformat(args.end))
-    elif args.window == "challenge":
-        window = challenge_window(date.fromisoformat(args.today) if args.today else date.today())
     else:
-        window = dev_window()
+        window = _window(args)
     print(window, f"(published from {window.published_from})" if window.published_from else "")
     with closing(open_repository(settings)) as repo:
         rep = fetch(
@@ -113,10 +110,10 @@ def cmd_parse(args: argparse.Namespace) -> int:
 
 
 def _window(args: argparse.Namespace):
-    from datetime import date
+    from suva.windows import challenge_window, dev_window, publication_window
 
-    from suva.windows import challenge_window, dev_window
-
+    if args.published_from is not None:
+        return publication_window(args.published_from, args.published_to)
     if args.window == "challenge":
         return challenge_window(date.fromisoformat(args.today) if args.today else date.today())
     return dev_window()
@@ -507,6 +504,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--today", help="reference date for the challenge window (YYYY-MM-DD, default: today)")
     p.add_argument("--start", help="custom window start (YYYY-MM-DD, with --end)")
     p.add_argument("--end", help="custom window end (YYYY-MM-DD)")
+    p.add_argument("--published-from", type=date.fromisoformat, help="first publication date (YYYY-MM-DD)")
+    p.add_argument("--published-to", type=date.fromisoformat, help="last publication date (YYYY-MM-DD)")
     p.add_argument("--no-entscheidsuche", action="store_true", help="OpenCaseLaw only (offline after download)")
     p.add_argument("--no-picks", action="store_true", help="skip Suva's picked judgements")
     p.add_argument("--no-html", action="store_true", help="skip HTML download for the picks")
@@ -527,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("score", help="score the window's judgements with rules.yaml and store it for the review app")
     p.add_argument("--window", choices=["dev", "challenge"], default="challenge")
     p.add_argument("--today", help="reference date for the challenge window (YYYY-MM-DD, default: today)")
+    p.add_argument("--published-from", type=date.fromisoformat, help="first publication date (YYYY-MM-DD)")
+    p.add_argument("--published-to", type=date.fromisoformat, help="last publication date (YYYY-MM-DD)")
     p.add_argument("--rules", help="rules file (default: rules/rules.yaml)")
     p.add_argument("--top", type=int, default=10, help="stored scores to print")
     p.set_defaults(func=cmd_score)
@@ -597,6 +598,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "fetch" and bool(args.start) != bool(args.end):
         parser.error("fetch requires both --start and --end for a custom range")
+    if args.command in ("fetch", "score"):
+        first, last = args.published_from, args.published_to
+        if (first is None) != (last is None):
+            parser.error("specify both --published-from and --published-to")
+        if first is not None and (first > last or args.today or getattr(args, "start", None)):
+            parser.error("use an ascending publication range without --today, --start or --end")
     return args.func(args)
 
 

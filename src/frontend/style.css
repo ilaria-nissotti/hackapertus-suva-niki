@@ -77,6 +77,8 @@ main { padding-block: 1.5rem }
 .coverage details { border: 0; padding: 0; font-size: .9rem }
 .coverage details[open] { flex-basis: 100% }
 .coverage [data-slot="collapsible-content"] { color: var(--muted); padding: .4rem 0 }
+.publication-filter { display: flex; flex-wrap: wrap; align-items: end; gap: .65rem; margin-bottom: .75rem }
+.publication-filter label + label { margin-top: 0 }
 .notice { margin-bottom: 1rem; padding: .75rem 1rem; background: var(--sheet); border-left: 3px solid var(--action) }
 .notice.warning { background: #f7efd9; border-left-color: var(--review); color: #3e2c00 }
 
