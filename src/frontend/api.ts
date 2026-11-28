@@ -50,3 +50,14 @@ export function operativeText(decision: string) {
     /^\p{Lu}[\p{L} .'-]*, (?:den |le |il )?\d{1,2}\.? \p{L}+ \d{4}\.?$/u.test(part.trim()));
   return (signature < 0 ? parts : parts.slice(0, signature)).join('\n\n');
 }
+
+export type Facet = {value: string; count: number};
+export type LibraryHit = {
+  key: string; docket: string; title: string; language: string; decision_date: string | null;
+  approved_at: string; snippet: string; statutes: string[]; outcome: string[];
+  topics: {id: string; explanation: string}[];
+};
+export type LibraryPage = {hits: LibraryHit[]; total: number;
+  facets: {statute: Facet[]; topic: Facet[]; outcome: Facet[]; language: Facet[]}};
+export type LibraryAnswer = {answer: string | null; message?: string;
+  cited: {key: string; language: string; snippet: string}[]};

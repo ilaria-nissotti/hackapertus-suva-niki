@@ -263,3 +263,27 @@ button.call-button:hover:not(:disabled) { background: #164f3a; border-color: #16
 .save-feedback { margin-top: .5rem }
 .save-feedback[role="status"] { color: var(--relevant) }
 .save-feedback[role="alert"] { color: var(--alert) }
+
+/* Section links in the masthead. */
+.sections { display: flex; gap: 1.25rem; margin-right: auto; margin-left: 2rem }
+.sections a { color: var(--muted); text-decoration: none; font-weight: 650; padding-block: .25rem }
+.sections a:hover { color: var(--ink) }
+.sections a[aria-current='page'] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--action) }
+
+/* Library: approved summaries as a searchable register. */
+.library { display: grid; gap: 1rem; max-width: 72rem }
+.library > p { max-width: 70ch; color: var(--muted) }
+.library-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem 1rem; padding-block: 1rem;
+  border-block: 1px solid var(--rule) }
+.facet { display: grid; gap: .25rem; font-size: .875rem; font-weight: 650; color: var(--muted) }
+.facet.query { flex: 1 1 100% }
+.facet select { min-width: 10rem }
+.library-hits { list-style: none; margin: 0; padding: 0 }
+.library-hits li { padding: .85rem 0; border-top: 1px solid var(--rule) }
+.library-hits a { font-weight: 700 }
+.snippet { font-family: var(--prose); margin-top: .35rem; max-width: 80ch }
+mark { background: #f7efd9; color: inherit; padding-inline: .1em }
+.library-ask { display: grid; gap: .6rem; max-width: 60rem; padding: 1.25rem; background: var(--sheet);
+  border: 1px solid var(--rule); border-radius: 6px }
+.library-ask label { display: grid; gap: .3rem; font-weight: 650 }
+.library-ask button { justify-self: start }

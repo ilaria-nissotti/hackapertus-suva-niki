@@ -6,6 +6,7 @@ summary drafts, approvals, audio briefings and cases a reviewer added by hand.
 """
 
 import argparse
+from collections import Counter
 from contextlib import closing
 from datetime import date
 from io import BytesIO
@@ -179,6 +180,87 @@ def dashboard_data():
     )
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def library_hits(query="", lang=None):
+    """Approved summaries matching `query`, with the metadata the library filters on."""
+    from suva.parse.citations import extract
+
+    with closing(connect()) as db:
+        rows = review_store.search_library(db, query, lang)
+    with closing(kb()) as repo:
+        meta = review_kb.case_metadata(repo, {row["case_key"] for row in rows})
+    hits = []
+    for row in rows:
+        info = meta.get(row["case_key"])
+        if info is None:  # the judgement left the knowledge base
+            continue
+        laws = sorted({c.law for c in extract(row["summary"]) if c.kind == "statute" and c.law})
+        hits.append({"key": row["case_key"], "language": row["lang"], "approved_at": row["approved_at"],
+                     "snippet": row["snippet"], "statutes": laws} | info)
+    return hits
+
+
+def library_facets(hits):
+    def count(values):
+        return [{"value": v, "count": n} for v, n in sorted(Counter(values).items(), key=lambda i: (-i[1], i[0]))]
+    return {
+        "statute": count(law for hit in hits for law in hit["statutes"]),
+        "topic": count(t["id"] for hit in hits for t in hit["topics"]),
+        "outcome": count(o for hit in hits for o in hit["outcome"]),
+        "language": count(hit["language"] for hit in hits),
+    }
+
+
+@app.get("/api/library")
+def library():
+    args = request.args
+    lang = args.get("language") if args.get("language") in {"de", "fr"} else None
+    try:
+        start, end = valid_date(args.get("date_from")), valid_date(args.get("date_to"))
+    except ValueError as exc:
+        return jsonify(message=str(exc)), 400
+    hits = library_hits(args.get("q", "").strip(), lang)
+    facets = library_facets(hits)
+    for name, field in (("statute", "statutes"), ("outcome", "outcome")):
+        if args.get(name):
+            hits = [hit for hit in hits if args[name] in hit[field]]
+    if args.get("topic"):
+        hits = [hit for hit in hits if any(t["id"] == args["topic"] for t in hit["topics"])]
+    if start or end:
+        hits = [hit for hit in hits if hit["decision_date"] and
+                (not start or hit["decision_date"] >= start.isoformat()) and
+                (not end or hit["decision_date"] <= end.isoformat())]
+    response = jsonify(hits=hits, total=len(hits), facets=facets)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/library/ask")
+def library_ask():
+    import library_ask as qa
+
+    body = request.get_json(silent=True) or {}
+    lang = body.get("lang") if body.get("lang") in {"de", "fr"} else "de"
+    question = body.get("question")
+    if not isinstance(question, str) or not question.strip() or len(question) > qa.MAX_QUESTION:
+        return jsonify(message=f"Ask a question of 1–{qa.MAX_QUESTION} characters."), 400
+    try:
+        config = model_config()
+    except ValueError as exc:
+        return jsonify(message=str(exc)), 503
+    with closing(connect()) as db:
+        sources = review_store.search_library(db, qa.search_terms(question), limit=qa.MAX_SOURCES, any_word=True)
+    if not sources:
+        return jsonify(answer=None, cited=[], message="No approved summary matches this question.")
+    try:
+        result = qa.answer(config, question.strip(), lang, sources)
+    except (OSError, ValueError) as exc:
+        app.logger.info("library_ask_failed error=%s", type(exc).__name__)
+        return jsonify(message="Could not answer from the library. Try rephrasing the question."), 502
+    by_key = {row["case_key"]: row for row in sources}
+    return jsonify(answer=result["answer"], cited=[
+        {"key": key, "language": by_key[key]["lang"], "snippet": by_key[key]["snippet"]} for key in result["cited"]])
 
 
 def prepare_briefing(key, lang):

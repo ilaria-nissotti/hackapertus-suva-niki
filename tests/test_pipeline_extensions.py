@@ -122,7 +122,6 @@ def test_draft_injects_relevant_term_pair_and_flags_wrong_language_token(monkeyp
     assert wrong in json.dumps(result["glossary_warnings"], ensure_ascii=False)
 
 
-@pending
 def test_library_indexes_approvals_by_language_and_replaces_old_text(client, case):
     de_version = add_draft(case, "de", "Entwurfskennung")
     fr_version = add_draft(case, "fr", "Brouillon")

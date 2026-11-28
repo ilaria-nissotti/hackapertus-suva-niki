@@ -119,3 +119,21 @@ def add_text(repo, docket, text, decision_date=None, publication_date=None, sour
         parse_all(repo, key=rec.key)
         score_keys(repo, [rec.key], rules)
     return rec.key
+
+
+def case_metadata(repo, keys, rules_digest=None):
+    """Decision date, title, topic rules and outcome of judgements, for library facets."""
+    from suva.scoring.derive import outcome
+
+    digest = rules_digest or current_rules_hash()
+    out = {}
+    for row in repo.list_review_rows(keys=list(keys)):
+        rec = record(row, digest)
+        dispositiv = " ".join(p["text"] for p in repo.list_passages(row["key"]) if p["kind"] == "dispositiv")
+        out[row["key"]] = {
+            "docket": rec["docket"], "title": rec["title"], "decision_date": rec["decision_date"],
+            "publication_date": rec["publication_date"], "status": rec["status"],
+            "topics": [{"id": f["id"], "explanation": f["explanation"]} for f in rec["fired"] if f["points"] > 0],
+            "outcome": outcome(dispositiv),
+        }
+    return out

@@ -18,6 +18,10 @@ SCHEMA = """
     CREATE TABLE IF NOT EXISTS review_cases (
         case_key TEXT PRIMARY KEY, added_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE VIRTUAL TABLE IF NOT EXISTS library USING fts5(
+        case_key UNINDEXED, lang UNINDEXED, approved_at UNINDEXED, summary,
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
 """
 
 
@@ -27,7 +31,21 @@ def connect(path):
     db = sqlite3.connect(path, timeout=20)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    backfill_library(db)
     return db
+
+
+def backfill_library(db):
+    """Index approvals saved before the library existed (once: only while the index is empty)."""
+    if db.execute("SELECT 1 FROM library LIMIT 1").fetchone():
+        return
+    rows = db.execute("""SELECT case_key, kind, approved FROM results r WHERE approved IS NOT NULL
+                         AND kind IN ('de', 'fr') AND rowid = (SELECT max(rowid) FROM results
+                         WHERE case_key = r.case_key AND kind = r.kind AND approved IS NOT NULL)""").fetchall()
+    if rows:
+        with db:
+            db.executemany("INSERT INTO library (case_key, lang, approved_at, summary) VALUES (?, ?, '', ?)",
+                           [tuple(row) for row in rows])
 
 
 # Summary results: one row per case, kind (facts, de, fr) and generation version.
@@ -59,7 +77,36 @@ def approve(db, key, kind, version, summary, previous_approved):
     with db:
         saved = db.execute("""UPDATE results SET approved=? WHERE case_key=? AND kind=? AND version=?
                               AND COALESCE(approved, '') = ?""", (summary, key, kind, version, previous_approved))
+        if saved.rowcount == 1:  # the library holds the latest approval per case and language
+            db.execute("DELETE FROM library WHERE case_key=? AND lang=?", (key, kind))
+            db.execute("INSERT INTO library (case_key, lang, approved_at, summary) VALUES (?, ?, datetime('now'), ?)",
+                       (key, kind, summary))
     return saved.rowcount == 1
+
+
+# Library: full-text search over approved summaries.
+
+def fts_query(text, any_word=False):
+    """User words as an FTS5 query (quoted, so operators are plain text): all words, or any with `any_word`."""
+    words = [w.replace('"', '') for w in text.split()]
+    return (" OR " if any_word else " ").join(f'"{w}"' for w in words if w)
+
+
+def search_library(db, query="", lang=None, limit=200, any_word=False):
+    """Approved summaries matching every word of `query` (all if empty), best match first."""
+    sql = "SELECT case_key, lang, approved_at, summary, {snippet} AS snippet FROM library"
+    args, where = [], []
+    match = fts_query(query, any_word)
+    if match:
+        where.append("library MATCH ?")
+        args.append(match)
+    if lang:
+        where.append("lang = ?")
+        args.append(lang)
+    snippet = "snippet(library, 3, '⟦', '⟧', '…', 24)" if match else "substr(summary, 1, 240)"
+    sql = sql.format(snippet=snippet) + (" WHERE " + " AND ".join(where) if where else "")
+    sql += " ORDER BY rank" if match else " ORDER BY approved_at DESC"
+    return db.execute(sql + " LIMIT ?", (*args, limit)).fetchall()
 
 
 # Cases a reviewer added by hand.
