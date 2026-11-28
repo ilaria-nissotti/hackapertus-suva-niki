@@ -18,6 +18,8 @@ This repository collects Swiss Federal Supreme Court judgements, reconciles them
 | `src/suva/llm.py` | OpenAI-compatible Apertus calls, endpoint-scoped cache replay, and audit metadata. |
 | `src/app.py`, `jobs.py`, `review_store.py`, `review_kb.py` | Flask review app. `app.py` holds the routes and startup checks. `jobs.py` runs the summary pipeline, the job queue and briefing jobs, without Flask. `review_store.py` owns every query on the app’s own `DATA_DIR/review.sqlite` (drafts, approvals, briefings, hand-added cases). `review_kb.py` reads judgements, parses and stored scores from the KB. |
 | `src/summaries.py`, `bger.py` | Factual brief and independent DE/FR drafts with few-shot Suva examples. `bger.py` holds config and the Apertus chat call. |
+| `src/suva/glossary.py`, `rules/glossary.yaml` | Expert-editable DE/FR term pairs: passed to the draft prompt, and other-language terms in a draft are flagged as `glossary_warnings`. |
+| `src/library_ask.py`, `case_search.py`, `export.py` | Library questions over approved summaries (FTS5 in `review.sqlite`, Apertus answer with cited cases). Precedent search for a case description (BM25 plus citation boosts, no LLM). HTML/Word/PDF export (`export.py`) of approved DE/FR summaries in the shape of Suva's `Export_*.html`. |
 | `src/briefing.py`, `conversation.py` | ElevenLabs narration of approved summaries, and grounded case questions with recap. |
 | `src/frontend/` | React/TypeScript workspace built with Vite and served by Flask. |
 | `tests/` | Offline tests for the CLI, inputs, adapters, storage, parser, scoring, review app, and Apertus client. HTTP and inference tests use test doubles. `conversation-ui.test.cjs` simulates the browser and media flows. |
