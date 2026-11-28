@@ -88,7 +88,12 @@ def read_bger(
         selection = in_window | (published.is_null() & selection)
     best: dict[str, SourceRecord] = {}
     dataset = ds.dataset(path, format="parquet")
-    for batch in dataset.to_batches(columns=cols, filter=selection, batch_size=1024):
+    # One row group at a time, checking the filter columns first, so full_text is decoded
+    # only where something matches (pyarrow cannot prune on docket or the publication OR).
+    groups = (g for f in dataset.get_fragments() for g in f.split_by_row_group(selection))
+    batches = (b for g in groups if g.count_rows(filter=selection)
+               for b in g.to_batches(columns=cols, filter=selection, batch_size=1024))
+    for batch in batches:
         for row in batch.to_pylist():
             if not (row.get("docket_number") or "").strip():
                 continue  # no docket, no identity: skip instead of crashing the whole fetch

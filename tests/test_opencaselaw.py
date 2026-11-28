@@ -110,3 +110,23 @@ def test_download_publishes_valid_snapshot(tmp_path, monkeypatch):
 def test_rows_without_a_docket_are_skipped(tmp_path):
     p = write(tmp_path, [row(None, "2025-10-01"), row("  ", "2025-10-02"), row("8C_1/2025", "2025-10-03")])
     assert [r.key for r in read_bger(p, date(2025, 10, 1), date(2025, 10, 31))] == ["8C_1/2025@2025-10-03"]
+
+
+def test_filters_span_row_groups(tmp_path):
+    rows = [row("8C_1/2025", "2025-10-01", text=None),
+            row("9C_5/2025", "2024-01-01"),
+            row("8C_1/2025", "2025-10-01", text="Complete text"),
+            row("8C_2/2025", "2025-05-01", publication_date="2025-10-15"),
+            row("8C_3/2025", "2025-05-01", publication_date="2025-05-20"),
+            row("8C_4/2025", "2025-10-02")]
+    cols = {k: [r[k] for r in rows] for k in rows[0]}
+    path = tmp_path / "bger.parquet"
+    pq.write_table(pa.table(cols), path, row_group_size=1)
+    assert pq.ParquetFile(path).num_row_groups == len(rows)
+
+    by_docket = {r.key: r for r in read_bger(path, dockets={"8C_1/2025", "9C_5/2025"})}
+    assert set(by_docket) == {"8C_1/2025@2025-10-01", "9C_5/2025@2024-01-01"}
+    assert by_docket["8C_1/2025@2025-10-01"].text == "Complete text"
+
+    window = read_bger(path, date(2025, 10, 1), date(2026, 3, 31), published_from=date(2025, 10, 1))
+    assert sorted(r.docket for r in window) == ["8C_1/2025", "8C_2/2025", "8C_4/2025"]
