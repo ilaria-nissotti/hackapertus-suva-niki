@@ -314,6 +314,26 @@ def test_duplicate_summarize_requests_queue_one_job_per_language(client, case, m
     assert len(submitted) == 1 and dashboard.pending == {(case, "de"), (case, "fr")}
 
 
+def test_summary_jobs_for_different_cases_run_side_by_side(monkeypatch):
+    both_running = threading.Barrier(2, timeout=5)
+    done = []
+
+    def job(key, kind):
+        both_running.wait()  # breaks (and the job fails) if the second case waits behind the first
+        done.append(key)
+        return True
+
+    monkeypatch.setattr(dashboard, "run_summary_job", job)
+    monkeypatch.setattr(dashboard, "pending", set())
+    dashboard.enqueue("8C_1/2026@2026-10-01", ["de"])
+    dashboard.enqueue("8C_2/2026@2026-10-02", ["de"])
+    for _ in range(100):
+        if len(done) == 2:
+            break
+        threading.Event().wait(0.05)
+    assert sorted(done) == ["8C_1/2026@2026-10-01", "8C_2/2026@2026-10-02"] and not both_running.broken
+
+
 def test_parallel_writers_on_one_knowledge_base_do_not_lock_each_other_out(tmp_path):
     path = tmp_path / "kb.sqlite"
     SQLiteRepository(path).migrate()

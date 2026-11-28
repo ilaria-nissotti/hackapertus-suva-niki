@@ -37,7 +37,8 @@ app.config.update(MAX_CONTENT_LENGTH=4 * 1024 * 1024,
                   DATABASE=_settings.data_dir / "review.sqlite",
                   KB=_settings.sqlite_path,
                   TODAY=None)  # reference date of the challenge window (None = today)
-pool = ThreadPoolExecutor(max_workers=1)
+# Summary and briefing jobs run side by side, like summarize-top; summary_lock stops duplicate Apertus calls.
+pool = ThreadPoolExecutor(max_workers=4)
 pending = set()
 pending_lock = threading.Lock()
 queue_read_lock = threading.Lock()
