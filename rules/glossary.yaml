@@ -1,0 +1,77 @@
+# Suva terminology: German / French term pairs for summaries
+# ==========================================================
+#
+# Each pair is the term Suva uses in a German summary and the one it uses in a French
+# summary. Edit freely; no code changes needed.
+#
+#   de / fr   the term in each language. All-capital abbreviations (UVG, LAA) match
+#             case-sensitively; other terms match ignoring case. Terms match whole words.
+#   flag      false = only suggest the pair to the model, never warn about it
+#             (use it for terms that are also ordinary words in the other language).
+#
+# How it is used
+#   1. Drafting: pairs whose German or French term occurs in the judgement or the factual
+#      brief are passed to Apertus with the instruction to use the target-language term.
+#   2. Review: a draft that contains the other language's term (e.g. "LAA" in a German
+#      summary) gets a glossary warning in the review workspace. It is a hint, not a rejection.
+#   3. Evaluation: `suva eval-summaries` measures how many glossary terms of Suva's own
+#      summary the draft uses.
+#
+# Many pairs below occur in the supplied DE/FR exports (judgements/Export_*.html).
+
+version: 1
+terms:
+  # Laws and courts
+  - {de: UVG, fr: LAA}
+  - {de: UVV, fr: OLAA}
+  - {de: ATSG, fr: LPGA}
+  - {de: IVG, fr: LAI}
+  - {de: IVV, fr: RAI}
+  - {de: AHVG, fr: LAVS}
+  - {de: BVG, fr: LPP}
+  - {de: KVG, fr: LAMal}
+  - {de: MVG, fr: LAM}
+  - {de: BGG, fr: LTF}
+  - {de: ZGB, fr: CC}
+  - {de: OR, fr: CO}
+  - {de: StGB, fr: CP}
+  - {de: BGE, fr: ATF}
+  - {de: BGer, fr: TF}
+  - {de: IV, fr: AI}
+  - {de: IV-Stelle, fr: office AI}
+  - {de: Bundesgericht, fr: Tribunal fédéral}
+  - {de: kantonales Gericht, fr: tribunal cantonal}
+  - {de: Versicherungsgericht, fr: tribunal des assurances}
+  # Accident insurance
+  - {de: Unfallversicherung, fr: assurance-accidents}
+  - {de: Unfallversicherer, fr: assureur-accidents}
+  - {de: Unfallbegriff, fr: notion d'accident}
+  - {de: Berufsunfall, fr: accident professionnel}
+  - {de: Nichtberufsunfall, fr: accident non professionnel}
+  - {de: Berufskrankheit, fr: maladie professionnelle}
+  - {de: unfallähnliche Körperschädigung, fr: lésion corporelle assimilée à un accident}
+  - {de: Wagnis, fr: entreprise téméraire}
+  - {de: Rückfall, fr: rechute}
+  - {de: Spätfolgen, fr: séquelles tardives}
+  - {de: Status quo sine, fr: statu quo sine}
+  - {de: natürlicher Kausalzusammenhang, fr: lien de causalité naturelle}
+  - {de: adäquater Kausalzusammenhang, fr: lien de causalité adéquate}
+  - {de: Prämie, fr: prime, flag: false}
+  # Benefits and invalidity
+  - {de: Taggeld, fr: indemnité journalière}
+  - {de: Heilbehandlung, fr: traitement médical}
+  - {de: Integritätsentschädigung, fr: indemnité pour atteinte à l'intégrité}
+  - {de: Invalidenrente, fr: rente d'invalidité}
+  - {de: Invaliditätsgrad, fr: taux d'invalidité}
+  - {de: Valideneinkommen, fr: revenu sans invalidité}
+  - {de: Invalideneinkommen, fr: revenu d'invalide}
+  - {de: Leidensabzug, fr: abattement}
+  - {de: Arbeitsunfähigkeit, fr: incapacité de travail}
+  - {de: Erwerbsunfähigkeit, fr: incapacité de gain}
+  # Procedure
+  - {de: Einspracheentscheid, fr: décision sur opposition}
+  - {de: Einsprache, fr: opposition, flag: false}
+  - {de: Beschwerdeführer, fr: recourant}
+  - {de: Beschwerdeführerin, fr: recourante}
+  - {de: Beweiswürdigung, fr: appréciation des preuves}
+  - {de: Untersuchungsgrundsatz, fr: maxime inquisitoire}

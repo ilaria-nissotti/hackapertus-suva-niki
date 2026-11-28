@@ -106,7 +106,6 @@ def test_eval_keeps_all_held_out_references_out_of_model_requests(settings, monk
     assert "aggregate" in output.casefold()
 
 
-@pending
 @pytest.mark.parametrize(("lang", "wrong", "reply"), [("de", "LAA", DE), ("fr", "UVG", FR)])
 def test_draft_injects_relevant_term_pair_and_flags_wrong_language_token(monkeypatch, lang, wrong, reply):
     if not (ROOT / "rules" / "glossary.yaml").exists():

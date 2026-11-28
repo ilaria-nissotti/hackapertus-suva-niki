@@ -147,6 +147,10 @@ function Summary({record, lang, audio, action, busy, visible}: {
           {saveStatus && <p className="save-feedback" role="status">{saveStatus}</p>}
           {saveError && <p className="save-feedback" role="alert">{saveError}</p>}
         </form> : (record.de.active || record.fr.active) && <p role="status">Generating summaries…</p>}
+      {!!result.data.glossary_warnings?.length && <div className="notice warning">
+        <strong>Terminology check</strong> (rules/glossary.yaml): <ul>{result.data.glossary_warnings.map(item =>
+          <li key={item.found}>“{item.found}” is the other language’s term; Suva uses “{item.expected}”.</li>)}</ul>
+      </div>}
       <Evidence label="Supporting passages for the draft" passages={result.data.quotes}/>
     </section>
     {result.approved && <section className="briefing" id="case-briefing">

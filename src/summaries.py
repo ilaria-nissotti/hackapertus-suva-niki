@@ -10,8 +10,9 @@ import logging
 import re
 
 from bger import chat
+from suva import glossary
 
-VERSION = "suva-4"
+VERSION = "suva-5"
 log = logging.getLogger(__name__)  # never log judgment text, prompts or model output
 
 # Frequent grammatical words distinguish the two supported summary languages
@@ -124,12 +125,14 @@ Match the structure, tone and terminology in the examples for this language.
 Compose directly in this language from the original and factual brief.
 Use examples for style only. Preserve procedural posture, the legal test,
 the court's reasoning and outcome. Do not invent facts, citations or holdings.
+For every pair in "terminology", use its "{lang}" term, never the other language's.
 Return a JSON object with keys "summary" (plain text with paragraphs, using JSON
 escaped newlines) and "evidence_ids" (array of source line numbers supporting
 the central reasoning). The first output character must be {{."""
     data = {
         "judgment_lines": source_passages, "factual_brief": facts,
         "style_examples": similar_examples(source, lang, record["docket"], examples),
+        "terminology": glossary.relevant_terms(source, json.dumps(facts, ensure_ascii=False)),
     }
     for reminder in ("", "\nUse the requested language throughout and include at least one valid evidence ID."):
         if reminder:
@@ -145,6 +148,7 @@ the central reasoning). The first output character must be {{."""
         result["quotes"] = resolve_passages(source_passages, result.pop("evidence_ids", None))[:4]
         summary = result.get("summary")
         if isinstance(summary, str) and has_summary_language(summary, lang) and result["quotes"]:
+            result["glossary_warnings"] = glossary.warnings(summary, lang)
             return result
         log.info("draft_rejected case=%s lang=%s attempt=%d reason=%s", record.get("key", record.get("docket")), lang, 2 if reminder else 1,
                  "no_summary" if not isinstance(summary, str) else

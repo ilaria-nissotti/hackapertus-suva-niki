@@ -4,12 +4,14 @@ export type QueueRow = {
   key: string; docket: string; title: string; publication_date: string | null; decision_date: string | null;
   score: number | null; status: string; issue?: string | null;
 };
+export type GlossaryWarning = {found: string; expected: string};
+type Draft = {summary: string; quotes: string[]; glossary_warnings: GlossaryWarning[]};
 export type FiredRule = {id: string; points: number; explanation: string};
 export type Judgment = Omit<QueueRow, 'issue'> & {
   date_source: string | null; source_url: string | null; decision: string | null; full_text: string; language: string | null;
   band: 'high' | 'check' | 'low' | null; fired: FiredRule[]; score_current: boolean;
-  de: Result<{summary: string; quotes: string[]}>;
-  fr: Result<{summary: string; quotes: string[]}>;
+  de: Result<Draft>;
+  fr: Result<Draft>;
 };
 export type Briefing = {key?: string; active?: boolean; configured?: boolean; ready?: boolean;
   error?: string; script?: string; excerpts?: string[]};
