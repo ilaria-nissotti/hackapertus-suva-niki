@@ -48,6 +48,10 @@ main { padding-block: clamp(1.5rem, 4vw, 3.5rem) 1.5rem }
 .coverage-dates small, footer, .muted { color: var(--muted); font-size: .875rem }
 .workspace { display: grid; gap: 1.15rem; align-items: start }
 .workspace.has-case { grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr) }
+@media (min-width: 861px) {
+  /* Keep the open case in view while the reviewer scrolls the queue beside it. */
+  .workspace > .case { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain }
+}
 .panel { min-width: 0; background: white; border: 1px solid var(--line); border-radius: .7rem; box-shadow: 0 3px 12px #17263b08 }
 .queue-header, .case-header, .case-body { padding: clamp(1rem, 2vw, 1.55rem) }
 .queue-header h2 small { color: var(--muted); font: 650 .875rem system-ui; margin-left: .35rem }
