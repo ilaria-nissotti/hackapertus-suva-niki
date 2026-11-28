@@ -116,7 +116,7 @@ def test_graded_rule_caps_10000_matching_articles():
     rs = parse_rules({"rules": [{"id": "g", "field": "articles", "match": {"regex": "UVG$"}, "per_match": 3,
                                  "max": 15, "explanation": "x"}]})
     s = score_record({"articles": [f"Art. {i} UVG" for i in range(10_000)]}, rs)
-    assert s.points == 15 and "(10000×)" in s.explanation
+    assert s.rule_points == 15 and "(10000×)" in s.explanation
 
 
 def test_text_rule_on_an_empty_field_list_does_not_fire():

@@ -1,21 +1,20 @@
 """Deterministic scorer: apply rules.yaml to a judgement record. No language model involved.
 
-    points = base + points of every rule that fires (+ judge points, if a verdict is given)
-    score  = 100 / (1 + e^(-points / scale))        # 0..100, S-shaped, never capped
+    rule points   = points of every rule that fires
+                  + judge points (if a verdict is given)
+    display score = base + rule points          (only in what lawyers see)
 
-Fitted on the data (`fit-weights`), the score approximates the probability (in %)
-that Suva would consider the judgement relevant.
+Rule points are what judgements are ranked, selected (select.py) and sent to the judge by.
+They are not a probability. `base` is the same for every judgement, so it is kept out of
+ranking, selection and the judge gate, and added only for display.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Any
 
 from suva.scoring.rules import RuleSet
-
-BANDS = ("high", "check", "low")
 
 
 @dataclass
@@ -28,29 +27,20 @@ class FiredRule:
 @dataclass
 class ScoreResult:
     key: str
-    score: float  # 0..100
-    points: float
-    band: str  # high | check | low
-    relevant: bool  # score >= threshold
+    rule_points: float  # sum of the fired rules (no base): ranking, selection and the judge gate use this
     fired: list[FiredRule] = field(default_factory=list)
+    base: float = 0.0  # ruleset.base, kept only to compute the display score
+
+    @property
+    def display_score(self) -> float:
+        """base + rule points: the number shown to lawyers. Never used to rank or select."""
+        return self.base + self.rule_points
 
     @property
     def explanation(self) -> str:
         if not self.fired:
             return "No rule matched."
         return " | ".join(f"{r.points:+g} {r.explanation}" for r in self.fired)
-
-
-def to_score(points: float, scale: float) -> float:
-    """Unrounded on purpose, so very low or very high scores still sort; round only for display."""
-    z = max(-60.0, min(60.0, points / scale))
-    return 100.0 / (1.0 + math.exp(-z))
-
-
-def band_for(score: float, ruleset: RuleSet) -> str:
-    if score >= ruleset.bands["high"]:
-        return "high"
-    return "low" if score < ruleset.bands["low"] else "check"
 
 
 def score_record(
@@ -66,12 +56,9 @@ def score_record(
         text = f"Apertus judge: {judge}" + (f" ({judge_reason})" if judge_reason else "")
         fired.append(FiredRule("llm_judge", ruleset.judge_points[judge], text))
     fired.sort(key=lambda f: -abs(f.points))
-    points = ruleset.base + sum(f.points for f in fired)
-    score = to_score(points, ruleset.scale)
-    return ScoreResult(record.get("key", ""), score, points, band_for(score, ruleset),
-                       score >= ruleset.threshold, fired)
+    return ScoreResult(record.get("key", ""), sum(f.points for f in fired), fired, ruleset.base)
 
 
-def rule_features(records: list[dict[str, Any]], ruleset: RuleSet) -> list[list[float]]:
-    """records x rules: 1/0 for normal rules, capped match counts for graded rules."""
+def features(records: list[dict[str, Any]], ruleset: RuleSet) -> list[list[float]]:
+    """records x ruleset.feature_ids: 1/0 for normal rules, capped match counts for graded rules."""
     return [[r.feature(rec) for r in ruleset.rules] for rec in records]

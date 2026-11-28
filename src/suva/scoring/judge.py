@@ -1,6 +1,6 @@
 """LLM judge (second stage): Apertus rates the relevance of candidate judgements.
 
-Runs only on candidates (rules score >= judge.candidate_threshold in rules.yaml),
+Runs only on candidates: rule points (without base) >= judge.candidate_floor_rule_points in rules.yaml,
 with a rubric that also lives in rules.yaml so experts control it. Answers are
 cached by the LLM client (temperature 0), so a judgement is not judged twice
 differently.
@@ -15,6 +15,8 @@ from typing import Any
 
 from suva.llm import LLMClient
 from suva.scoring.rules import RuleSet
+from suva.scoring.score import ScoreResult, score_record
+from suva.scoring.select import ranked
 
 PROMPT_VERSION = "judge/v2"
 LEVELS = ("high", "medium", "low")
@@ -39,7 +41,7 @@ class Verdict:
     key: str
     relevance: str | None  # high | medium | low, None if the answer was unusable
     reason: str
-    rules_score: float
+    rule_points: float  # rule points (no base) before the judge
     cached: bool
     error: str | None = None
 
@@ -78,7 +80,19 @@ def parse_verdict(text: str) -> tuple[str | None, str, str | None]:
     return level, str(data.get("reason", "")).strip(), None
 
 
-def judge_record(llm: LLMClient, record: dict[str, Any], ruleset: RuleSet, rules_score: float) -> Verdict:
+def candidates(records: list[dict[str, Any]], ruleset: RuleSet, floor_rule_points: float | None = None,
+               limit: int | None = None) -> list[tuple[dict[str, Any], ScoreResult]]:
+    """Judgements the judge sees: rule points >= the floor (no base), most rule points first.
+
+    floor_rule_points defaults to judge.candidate_floor_rule_points; None there means every judgement.
+    """
+    floor = ruleset.judge_floor_rule_points if floor_rule_points is None else floor_rule_points
+    scored = ranked((r, score_record(r, ruleset)) for r in records)
+    out = [(r, s) for r, s in scored if floor is None or s.rule_points >= floor]
+    return out[:limit] if limit else out
+
+
+def judge_record(llm: LLMClient, record: dict[str, Any], ruleset: RuleSet, rule_points: float) -> Verdict:
     rubric = ruleset.judge.get("rubric") or DEFAULT_RUBRIC
     messages = [
         {"role": "system", "content": f"{rubric.strip()}\n\n{INSTRUCTIONS}"},
@@ -87,28 +101,4 @@ def judge_record(llm: LLMClient, record: dict[str, Any], ruleset: RuleSet, rules
     result = llm.chat(messages, prompt_version=PROMPT_VERSION, max_tokens=300,
                       model=ruleset.judge.get("model") or None)
     level, reason, error = parse_verdict(result.text)
-    return Verdict(record["key"], level, reason, rules_score, result.cached, error)
-
-
-def compare_with_judge(
-    records: list[dict[str, Any]], candidates: list[tuple[dict[str, Any], Any]],
-    verdicts: list[tuple[dict[str, Any], Verdict]], threshold: float,
-) -> list[dict[str, Any]]:
-    """Precision and recall of the rules, the judge (high/medium) and both combined.
-
-    `candidates` are (record, rules score) pairs and `verdicts` (record, verdict) pairs for the judged candidates.
-    Recall counts every relevant judgement in `records`, not only the candidates.
-    """
-    usable = [(r, v) for r, v in verdicts if v.relevance]
-    n_rel = sum(r["relevant"] for r in records)
-    rows = []
-    for name, flagged in (
-        ("rules only", [r for r, s in candidates if s.score >= threshold]),
-        ("judge only (high/medium)", [r for r, v in usable if v.relevant]),
-        ("rules AND judge", [r for r, v in usable if v.relevant and v.rules_score >= threshold]),
-        ("rules OR judge", [r for r, v in usable if v.relevant or v.rules_score >= threshold]),
-    ):
-        tp = sum(r["relevant"] for r in flagged)
-        rows.append({"name": name, "flagged": len(flagged), "precision": tp / len(flagged) if flagged else 0.0,
-                     "recall": tp / n_rel if n_rel else 0.0})
-    return rows
+    return Verdict(record["key"], level, reason, rule_points, result.cached, error)

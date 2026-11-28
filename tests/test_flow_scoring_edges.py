@@ -1,14 +1,14 @@
-"""Scoring edge cases: the S-curve, band edges, rule counting, validation, fit and evaluation.
+"""Scoring edge cases: rule counting, validation, fit and evaluation (rule points; see test_select.py for the reading list).
 
 Tests describe what the code does today. `# BUG:` marks behaviour that looks wrong.
 """
 
 import pytest
 
-from suva.scoring.evaluate import calibration, evaluate, metrics, ranking, write_scores
-from suva.scoring.fit import fit_weights, recall_threshold, write_fitted
+from suva.scoring.evaluate import evaluate, ranking, write_scores
+from suva.scoring.fit import fit_weights, write_fitted
 from suva.scoring.rules import RuleSet, RulesError, load_rules, parse_rules
-from suva.scoring.score import ScoreResult, band_for, rule_features, score_record, to_score
+from suva.scoring.score import ScoreResult, score_record
 from suva.scoring.store import rules_hash
 from suva.sources.base import SourceRecord
 from test_scoring import RULES, rec
@@ -23,30 +23,7 @@ def one_rule_set(**overrides):
     return parse_rules({"rules": [rule(**overrides)]})
 
 
-# --- to_score: the S-curve -------------------------------------------------------------------
-
-def test_zero_points_is_exactly_fifty():
-    assert to_score(0, 10) == 50.0
-
-
-def test_score_stays_inside_0_100_for_extreme_points():
-    assert 0.0 < to_score(-1e9, 10) < to_score(1e9, 10) == 100.0
-
-
-def test_negative_points_are_clamped_at_minus_60_log_odds():
-    assert to_score(-600, 10) == to_score(-1000, 10)
-    assert to_score(-599, 10) > to_score(-600, 10)
-
-
-def test_high_scores_saturate_to_100_but_still_rank_by_points():
-    assert to_score(367, 10) < 100.0
-    assert to_score(368, 10) == to_score(600, 10) == 100.0  # float precision: the score itself ties
-    top = [(rec(f"8C_{p}/2025@2025-10-02", relevant=p == 600), ScoreResult("", to_score(p, 10), p, "high", True))
-           for p in (400, 600, 368)]
-    from suva.scoring.evaluate import ranked
-    assert [s.points for _, s in ranked(top)] == [600, 400, 368]  # points break the tie
-    assert ranking(top).precision_at[10] == 1 / 3 and ranking(top).depth_for_recall[1.0] == 1
-
+# --- stored scores ---------------------------------------------------------------------------
 
 def test_stored_scores_with_equal_score_are_listed_by_points(repo):
     for p in (400, 600, 368):
@@ -56,30 +33,7 @@ def test_stored_scores_with_equal_score_are_listed_by_points(repo):
     assert [s["points"] for s in repo.list_scores()] == [600, 400, 368]
 
 
-def test_direct_ruleset_with_zero_scale_divides_by_zero():
-    # parse_rules forbids scale <= 0, but a RuleSet built in code does not.
-    with pytest.raises(ZeroDivisionError):
-        score_record(rec(), RuleSet(rules=[], scale=0))
-
-
-# --- band_for / relevant ----------------------------------------------------------------------
-
-@pytest.mark.parametrize("score, band", [
-    (70.0, "high"), (69.999, "check"), (30.0, "check"), (29.999, "low"), (100.0, "high"), (0.0, "low"),
-])
-def test_band_edges_are_inclusive_at_high_and_low(score, band):
-    assert band_for(score, RuleSet(rules=[])) == band  # defaults: high 70, low 30
-
-
-def test_equal_low_and_high_bands_never_give_check():
-    rs = parse_rules({"rules": [], "bands": {"high": 40, "low": 40}})
-    assert {band_for(s, rs) for s in (0, 39.99, 40, 40.01, 100)} == {"low", "high"}
-
-
-def test_relevant_is_inclusive_at_the_threshold():
-    rs = parse_rules({"rules": [], "threshold": 50})
-    assert score_record(rec(), rs).score == 50.0 and score_record(rec(), rs).relevant
-
+# --- explanation -----------------------------------------------------------------------------
 
 def test_no_rule_fired_gives_a_clear_explanation():
     assert score_record(rec(), parse_rules({"rules": []})).explanation == "No rule matched."
@@ -137,7 +91,7 @@ def test_graded_rule_with_max_zero_fires_for_zero_points():
                                  "max": 0, "explanation": "Accident."}]})
     s = score_record({"text": "Unfall"}, rs)
     # The rule shows up as "fired" in the explanation although it adds nothing.
-    assert [(f.id, f.points) for f in s.fired] == [("g", 0)] and s.points == 0
+    assert [(f.id, f.points) for f in s.fired] == [("g", 0)] and s.rule_points == 0
 
 
 def test_graded_rule_without_max_is_uncapped():
@@ -146,20 +100,12 @@ def test_graded_rule_without_max_is_uncapped():
     assert r.cap_count == float("inf") and r.points_for(100) == 200
 
 
-def test_rule_features_are_binary_or_capped_counts():
-    rs = parse_rules({"rules": [
-        rule(id="fixed"),
-        {"id": "g", "field": "text", "match": {"any": ["Suva"]}, "per_match": 2, "max": 4, "explanation": "x"},
-    ]})
-    assert rule_features([{"text": "Suva Suva Suva"}, {"text": ""}], rs) == [[1.0, 2.0], [0.0, 0.0]]
-
-
 # --- parse_rules validation ------------------------------------------------------------------
 
 @pytest.mark.parametrize("data, message", [
-    ({"rules": [], "scale": 0}, "scale must be positive"),
-    ({"rules": [], "scale": -1}, "scale must be positive"),
-    ({"rules": [], "threshold": "high"}, "threshold must be a number"),
+    ({"rules": [], "scale": 0}, "'scale' is no longer used"),
+    ({"rules": [], "scale": -1}, "'scale' is no longer used"),
+    ({"rules": [], "threshold": "high"}, "'threshold' is no longer used"),
     ({"rules": [], "base": None}, "base must be a number"),
     ({"rules": [], "bands": {"high": 120, "low": 10}}, "bands"),
     ({"rules": [], "bands": {"high": 20, "low": 30}}, "bands"),
@@ -184,7 +130,8 @@ def test_non_string_regex_is_a_rules_error(regex):
 
 def test_empty_rules_list_is_allowed_and_scores_base_only():
     rs = parse_rules({"rules": [], "base": -20})
-    assert score_record(rec(), rs).points == -20
+    s = score_record(rec(), rs)
+    assert s.rule_points == 0 and s.display_score == -20  # base is display only
 
 
 def test_rules_hash_ignores_comments_but_not_weights():
@@ -195,14 +142,6 @@ def test_rules_hash_ignores_comments_but_not_weights():
 
 
 # --- fit ---------------------------------------------------------------------------------------
-
-def test_recall_threshold_edges():
-    assert recall_threshold([10, 20], [False, False]) == 50.0  # no relevant records
-    assert recall_threshold([80.7], [True]) == 80
-    # 10 relevant -> keep 9 -> the 9th highest relevant score, floored
-    scores = [95, 90, 85, 80, 75, 70, 65, 60, 55.5, 5]
-    assert recall_threshold(scores, [True] * 10) == 55
-
 
 def test_fit_needs_both_classes():
     rs = parse_rules(RULES)
@@ -234,19 +173,8 @@ def test_write_fitted_round_trips_through_load_rules(tmp_path):
 # --- evaluate ----------------------------------------------------------------------------------
 
 def scored(*pairs):
-    return [(rec(f"8C_{i}/2025@2025-10-02", relevant=rel), ScoreResult("", s, 0, "check", s >= 50))
+    return [(rec(f"8C_{i}/2025@2025-10-02", relevant=rel), ScoreResult("", s))  # s = rule points
             for i, (s, rel) in enumerate(pairs)]
-
-
-def test_metrics_with_nothing_flagged_and_nothing_relevant():
-    m = metrics(scored((10, False), (20, False)), 50)
-    assert (m.flagged, m.precision, m.recall) == (0, 0.0, 0.0)
-    assert metrics([], 50).flagged == 0
-
-
-def test_metrics_threshold_is_inclusive():
-    m = metrics(scored((50, True), (49.99, True)), 50)
-    assert (m.true_pos, m.false_neg) == (1, 1)
 
 
 def test_ranking_on_empty_and_one_class_inputs():
@@ -261,15 +189,9 @@ def test_ranking_ties_are_broken_pessimistically():
     assert r.precision_at[10] == 0.5 and r.depth_for_recall[1.0] == 2 and r.auc == 0.5
 
 
-def test_calibration_puts_a_perfect_score_in_the_top_bin():
-    bins = calibration(scored((100.0, True), (0.0, False), (9.99, False)))
-    assert [b["bin"] for b in bins] == ["0-10", "90-100"] and bins[0]["n"] == 2
-
-
 def test_evaluate_and_write_scores_on_an_empty_split(tmp_path):
     ev = evaluate([], parse_rules(RULES), "test")
-    assert ev.n == 0 and ev.at_threshold.flagged == 0 and ev.calibration == []
+    assert ev.n == 0 and ev.selection.periods == 0
     out = tmp_path / "scores.csv"
     write_scores([], parse_rules(RULES), out)
-    assert out.read_text(encoding="utf-8").splitlines() == [
-        "rank,key,split,relevant_label,score,band,points,flagged,fired_rules,explanation,subject"]
+    assert out.read_text(encoding="utf-8").startswith("rank,key,split,relevant_label,score,rule_points,")

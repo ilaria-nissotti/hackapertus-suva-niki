@@ -157,43 +157,37 @@ def test_evaluate_with_judge_but_no_judge_points_warns(settings, tmp_path, capsy
     assert "needs judge.points" in capsys.readouterr().err
 
 
-def test_evaluate_threshold_override(settings, capsys):
-    build_dataset(settings)
-    assert cli.main(["evaluate", "--threshold", "0"]) == 0
-    assert "At threshold 0: flagged 6" in capsys.readouterr().out
-
-
-def test_judge_uses_yaml_threshold_and_records_verdicts(settings, tmp_path, monkeypatch, capsys):
+def test_judge_uses_yaml_floor_and_records_verdicts(settings, tmp_path, monkeypatch, capsys):
     from suva import llm
 
     build_dataset(settings)
     client, calls = fake_client(reply='{"relevance": "high", "reason": "Suva party."}')
     monkeypatch.setattr(llm, "_build_openai_client", lambda s: client)
     rules = tmp_path / "rules.yaml"
-    rules.write_text(yaml.safe_dump(RULES | {"judge": {"candidate_threshold": 60, "points": {"high": 10}}}),
+    rules.write_text(yaml.safe_dump(RULES | {"judge": {"candidate_floor_rule_points": 1, "points": {"high": 10}}}),
                      encoding="utf-8")
 
     assert cli.main(["judge", "--rules", str(rules)]) == 0
     out = capsys.readouterr().out
-    assert "rules score >= 60" in out  # the YAML value wins over the CLI fallback of 20
+    assert "candidates (rule points >= 1)" in out  # the YAML floor applies without a CLI override
     lines = (settings.data_dir / "scoring" / "judge_train.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(lines) == len(calls.calls) == 3 and json.loads(lines[0])["relevance"] == "high"
+    assert len(lines) == len(calls.calls) > 0 and json.loads(lines[0])["relevance"] == "high"
 
-    assert cli.main(["judge", "--rules", str(rules), "--candidate-threshold", "101", "--limit", "1"]) == 0
-    assert "candidates (rules score >= 101): 0 of 6" in capsys.readouterr().out
+    assert cli.main(["judge", "--rules", str(rules), "--candidate-floor-rule-points", "10000", "--limit", "1"]) == 0
+    assert "candidates (rule points >= 10000): 0 of 6" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("value, shown", [(None, "20"), (0, "0")])
-def test_judge_with_empty_or_zero_yaml_threshold(settings, tmp_path, monkeypatch, capsys, value, shown):
+@pytest.mark.parametrize("value, shown", [(None, "all"), (0, "rule points >= 0")])
+def test_judge_with_empty_or_zero_yaml_floor(settings, tmp_path, monkeypatch, capsys, value, shown):
     from suva import llm
 
     build_dataset(settings)
     client, _ = fake_client(reply='{"relevance": "low", "reason": "x"}')
     monkeypatch.setattr(llm, "_build_openai_client", lambda s: client)
     rules = tmp_path / "rules.yaml"
-    rules.write_text(yaml.safe_dump(RULES | {"judge": {"candidate_threshold": value}}), encoding="utf-8")
+    rules.write_text(yaml.safe_dump(RULES | {"judge": {"candidate_floor_rule_points": value}}), encoding="utf-8")
     assert cli.main(["judge", "--rules", str(rules), "--limit", "1"]) == 0
-    assert f"rules score >= {shown})" in capsys.readouterr().out
+    assert f"candidates ({shown})" in capsys.readouterr().out
 
 
 def test_judge_keeps_going_when_a_call_fails(settings, tmp_path, monkeypatch, capsys):
@@ -202,7 +196,7 @@ def test_judge_keeps_going_when_a_call_fails(settings, tmp_path, monkeypatch, ca
     build_dataset(settings)
     client, _ = fake_client(fail=TimeoutError("down"))
     monkeypatch.setattr(llm, "_build_openai_client", lambda s: client)
-    assert cli.main(["judge", "--candidate-threshold", "0", "--limit", "2"]) == 0
+    assert cli.main(["judge", "--candidate-floor-rule-points", "0", "--limit", "2"]) == 0
     assert capsys.readouterr().err.count("FAILED") == 2
 
 

@@ -4,23 +4,20 @@
 # This file decides which judgements are relevant. Edit it freely; no code changes needed.
 #
 # How scoring works
-#   points = base + the weights of every rule that matches (negative weights subtract)
-#   score  = 100 / (1 + e^(-points / scale))      a 0-100 score on an S-curve, never capped
+#   rule points = the weights of every rule that matches (negative weights subtract)
+#   score       = base + rule points          (display only)
 #
-#     points  -30   -20   -10     0   +10   +20   +30
-#     score     5    12    27    50    73    88    95      (with scale 10)
-#
-#   With weights fitted on the data (`python -m suva fit-weights`), the score roughly means
-#   "chance in % that Suva would consider this judgement relevant".
-#   +10 points always multiplies the odds by about 2.7, wherever the judgement starts.
-#   A judgement is flagged as relevant if score >= threshold. Bands group scores for triage.
-#   The explanations of the matching rules are shown to lawyers as the reason for the score.
+#   Judgements are ranked by their rule points: more points, higher on the list. Rule points are
+#   not a probability; only the order matters. Lawyers then see the top N per month (see `selection`).
+#   Ranking, the selection floor and the judge gate all use rule points; base is never involved.
+#   The explanations of the matching rules are shown to lawyers as the reason for the rank.
 #
 # Writing a rule
 #   id:           short unique name (letters, digits, underscores)
 #   description:  what the rule means, in plain words
 #   field:        where to look in the judgement:
 #                   parties         the parties (Verfahrensbeteiligte / Participants à la procédure)
+#                   appellant       the party that appealed (before "gegen / contre / contro"), without its lawyer
 #                   subject         the one-line subject (Gegenstand / Objet / Oggetto)
 #                   header          everything before the facts
 #                   regeste         the headnote of a leading decision (BGE / ATF / DTF), empty otherwise
@@ -34,9 +31,14 @@
 #                   bge             leading decisions cited, e.g. "BGE 134 V 109"
 #                   chamber         court division prefix: 8C, 9C, 4A ...
 #                   language        de, fr, it
+#                   outcome         how the court ruled: upheld, partly_upheld, dismissed, not_entered,
+#                                   written_off, sent_back (several possible)
+#                   reasoning_pages length of the court's reasoning in pages (about 3,000 characters each)
 #   match:        any: [...]   fires if at least one term is found
 #                 all: [...]   fires only if every term is found
 #                 regex: "..." for advanced patterns
+#                 none: [...]  does not fire if any of these is found (combine with any/all/regex)
+#                 min: N       number fields only: fires from N on
 #                 Text is matched as whole words, ignoring upper/lower case.
 #                 List terms in German, French AND Italian: judgements exist in one language only.
 #   case_sensitive: true       optional, e.g. for short abbreviations like "CNA"
@@ -45,22 +47,31 @@
 #   per_match:    points per match (e.g. per UVG article cited)
 #   max:          cap on the points of a graded rule (optional)
 #   explanation:  sentence shown to lawyers when the rule fires
+#   group:        topic (what the case is about, default) | significance (whether it matters)
 #   source:       where the rule comes from: expert | data | apertus | hypothesis
 #   evidence:     filled in from `python -m suva evaluate` (how often it fires in relevant vs not relevant)
 #
 # Workflow
 #   python -m suva analyze        find candidate rules in the training data
-#   python -m suva evaluate       check the rules: precision, recall, misses, false alarms
-#   python -m suva fit-weights    suggest weights from the data (written to rules.fitted.yaml)
+#   python -m suva evaluate       check the reading list: recall and precision of the top N, misses, false alarms
+#   python -m suva cv             the same on judgements the weights were not fitted on (cross-validation)
+#   python -m suva fit-weights    suggest weights and a floor from the data (written to rules.fitted.yaml)
 
-# base, threshold and weights: fitted on the training data (decisions 2025-10-01 to 2026-02-28)
-# with `python -m suva fit-weights`, then copied here. Adjust freely.
-base: -95         # starting points: most judgements are not relevant (about 1.5%)
-scale: 10         # points per unit of log-odds; leave at 10 unless all weights are rescaled
-threshold: 9      # flag as relevant from this score (low on purpose: missing a relevant judgement is worse)
-bands:            # triage bands shown to lawyers
-  high: 50        # score >= 50: very likely worth summarising
-  low: 5          # score < 5: unlikely to be relevant; in between: check
+# base and weights: fitted on the training data (decisions 2025-10-01 to 2026-02-28)
+# with `python -m suva fit-weights`, then copied here (28 Nov 2026). Adjust freely.
+base: -100        # display only: the score shown to lawyers is base + rule points. Not used to rank,
+                  # select or decide which judgements the judge sees
+
+# What lawyers see: the top_n judgements of each period, most rule points first.
+#   floor_rule_points only shortens a period's list: in a quiet month, judgements below the floor are
+#   left out instead of filling all top_n places. It never adds judgements.
+#   Rule points depend on the weights: when the weights change, take the new floor from `fit-weights`.
+selection:
+  top_n: 30               # judgements shown per period. Training picks found: 87% (`cv`, refit),
+                          # 94% with these weights on train (`evaluate`; optimistic, they were fitted on train)
+  floor_rule_points: 76   # in rule points, without base; suggested by `fit-weights` with these weights
+                          # (keeps 90% of the relevant training judgements)
+  per: month              # month | week | period (the whole input as one list)
 
 rules:
   - id: suva_party
@@ -74,7 +85,7 @@ rules:
         - Istituto nazionale svizzero di assicurazione contro gli infortuni
         - CNA
         - INSAI
-    weight: 6
+    weight: 12
     explanation: "Suva is directly involved as a party."
     source: hypothesis
     evidence: ""
@@ -89,7 +100,7 @@ rules:
         - assurance accidents
         - assicurazione contro gli infortuni
         - assicurazione infortuni
-    weight: 51
+    weight: 47
     explanation: "The case is about accident insurance."
     source: hypothesis
     evidence: ""
@@ -100,8 +111,8 @@ rules:
     match:
       regex: " (UVG|UVV)$"
     case_sensitive: true
-    per_match: 6
-    max: 30
+    per_match: 5
+    max: 25
     explanation: "Applies accident insurance law (UVG/UVV articles cited)."
     source: hypothesis
     evidence: ""
@@ -119,14 +130,14 @@ rules:
     weight: 41
     explanation: "The case is about invalidity insurance."
     source: data
-    evidence: "all 13 relevant judgements missed by the first rules were invalidity insurance cases"
+    evidence: "train: fires in 13/47 relevant, 151/3162 not relevant (evaluate)"
 
   - id: social_insurance_chamber
     description: Decided by a social insurance division (8C or 9C)
     field: chamber
     match:
       any: [8C, 9C]
-    weight: 32
+    weight: 30
     explanation: "Decided by a social insurance division of the court."
     source: hypothesis
     evidence: ""
@@ -162,18 +173,74 @@ rules:
     field: dispositiv
     match:
       any: [nicht eingetreten, irrecevable, inammissibile]
-    weight: -43
+    weight: -39
     explanation: "Appeal declared inadmissible: no ruling on the substance."
     source: hypothesis
     evidence: ""
 
+# --- Significance: whether a case matters, not just what it is about ------------------------
+# The topic rules cannot tell a routine accident-insurance case from one Suva summarises.
+# These rules look at who appealed, how the court ruled and how much reasoning it needed.
+# Weights fitted by `fit-weights` on the training split; `compare` and `cv` show the gain.
+
+  - id: insurer_appeals
+    group: significance
+    description: An accident insurer (Suva or another) brought the appeal
+    field: appellant
+    match:
+      any: [Suva, Schweizerische Unfallversicherungsanstalt, Caisse nationale suisse d'assurance en cas d'accidents,
+            CNA, INSAI, Versicherung, Versicherungen, Versicherungs, Assurance, Assurances, assicurazione,
+            assicurazioni, Allianz, AXA, Helvetia, Mobiliar, Generali, Baloise, Bâloise, Vaudoise, Zurich, Visana,
+            SWICA, Helsana, CSS, Sanitas, Concordia, Solida, Groupe Mutuel, Elips, HOTELA, Sympany]
+      none: [IV-Stelle, assurance-invalidité, assicurazione invalidità, Ufficio AI, IVSTA, Ausgleichskasse,
+             caisse de compensation, cassa di compensazione, Arbeitslosenkasse, caisse de chômage, Vorsorge,
+             prévoyance, previdenza, Pensionskasse, caisse de pensions]
+    weight: 14
+    explanation: "The insurer appealed: the legal question likely matters beyond this case."
+    source: data
+    evidence: "train, accident/invalidity cases: 14/47 relevant vs 3/182 not relevant (docs/pitch_stats.py)"
+
+  - id: appeal_upheld
+    group: significance
+    description: The court upheld the appeal, fully or in part (the lower court got something wrong)
+    field: outcome
+    match:
+      any: [upheld, partly_upheld]
+    weight: 6
+    explanation: "The appeal was upheld: the court corrected the lower court."
+    source: data
+    evidence: "train, accident/invalidity cases: 17/47 relevant vs 25/182 not relevant (docs/pitch_stats.py)"
+
+  - id: clarifies_case_law
+    group: significance
+    description: The court changes or clarifies its case law (DE, FR, IT wording)
+    field: considerations
+    match:
+      regex: "Praxisänderung|Änderung der Rechtsprechung|Präzisierung der Rechtsprechung|Rechtsprechung (zu )?präzisieren|changement de jurisprudence|précis(er|e|ion de) (la|sa|notre) jurisprudence|cambiamento di giurisprudenza|precisa(re|zione della)? (la )?(sua )?giurisprudenza"
+    weight: 12
+    explanation: "The court changes or clarifies its case law."
+    source: hypothesis
+    evidence: ""
+
+  - id: long_reasoning
+    group: significance
+    description: The court's reasoning runs to 4 pages or more (routine cases are short)
+    field: reasoning_pages
+    match:
+      min: 4
+    weight: 5
+    explanation: "Detailed reasoning (4+ pages)."
+    source: data
+    evidence: "train, accident/invalidity cases: 32/47 relevant vs 64/182 not relevant (docs/pitch_stats.py)"
+
 # LLM judge (second stage, optional): Apertus rates candidates and gives a written reason.
-#   candidate_threshold: only judgements with a score at or above this are sent to the judge
+#   candidate_floor_rule_points: only judgements with at least this many rule points (no base) are sent
+#                           to the judge. Same as the selection floor; like it, it depends on the weights
 #   model: leave empty to use LLM_NAME from .env
-#   points: added to the rules points when a verdict exists (`evaluate --with-judge`)
+#   points: added to the rule points when a verdict exists (`evaluate --with-judge`)
 #   rubric: what Suva considers relevant, in plain words; the judge follows it
 judge:
-  candidate_threshold: 5
+  candidate_floor_rule_points: 76
   model:
   points:
     high: 10
