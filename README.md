@@ -80,12 +80,20 @@ The pipeline collects judgments into a local knowledge base, parses them and
 scores each one with expert-editable rules. A local review app (React,
 TypeScript, Vite, Flask) shows the ranked queue with the reasons for each score
 and drafts German and French summaries with Apertus via Keera. Building the
-frontend requires Node.js 20.19+ or 22.12+. Set `LLM_BASE_URL`, `LLM_NAME` and
-`LLM_API_KEY` in the ignored `.env` file at the repo root (see `.env.example`).
+frontend requires Node.js 20.19+ or 22.12+.
+
+Copy `.env.example` to the ignored `.env` at the repo root and fill it in.
+`LLM_BASE_URL`, `LLM_NAME` and `LLM_API_KEY` (Apertus) are required. The
+ElevenLabs settings are optional and enable audio and voice questions.
+`DATA_DIR`, `DATABASE_URL`, `LLM_CACHE_MODE`, `LLM_TIMEOUT`,
+`LLM_MAX_RETRIES` and `LOG_LEVEL` have working defaults. Shell variables take
+precedence over `.env`.
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -e . pytest
+cp .env.example .env                                # then fill in the values
+.venv/bin/python -m suva llm-ping                   # checks the Apertus endpoint (uncached)
 .venv/bin/python -m suva init-db
 .venv/bin/python -m suva import-supplied            # Suva's summaries and picks
 .venv/bin/python -m suva split-examples --manifest data/split-manifest.json
@@ -94,8 +102,12 @@ python3 -m venv .venv
 .venv/bin/python -m suva score                      # rules score + explanation per judgment
 npm --prefix src/frontend ci
 npm --prefix src/frontend run build
-.venv/bin/python src/app.py serve
+.venv/bin/python src/app.py serve --strict          # refuses to start without LLM config, frontend build or KB
 ```
+
+On startup the app logs its configuration and one line per missing setting to
+stderr (never keys). Without `--strict` it starts anyway and shows the problem
+on the drafts.
 
 Open [the local review dashboard](http://127.0.0.1:5050). The queue lists the
 judgments of the window, sorted by score, each with the rules that fired
@@ -119,8 +131,7 @@ judgment text with its decision date. To queue a case that already has source
 text, select it from the knowledge base. See `src/suva/scoring/README.md` for
 ranking evaluation and rule tuning.
 
-Run the offline one-case pipeline regression with
-`.venv/bin/python -m pytest -q tests/test_review_pipeline.py`.
+See [Tests and smoke test](#tests-and-smoke-test) below.
 
 The observed publication dates are shown in the UI. They reflect the sources'
 coverage; the window may contain more cases. The app binds to loopback and
@@ -165,10 +176,22 @@ answers require **Text to Speech** and the existing language voice IDs. The
 app does not save microphone recordings. For the demo use public judgments
 and avoid including nonpublic information in questions.
 
+### Tests and smoke test
+
+All tests are offline and use test doubles for HTTP, Apertus and ElevenLabs.
+
 ```sh
-.venv/bin/python -m pytest -q
-node --test tests/conversation-ui.test.cjs
+.venv/bin/python -m pytest -q                                   # Python: pipeline, app, stress and logging tests
+node --test tests/conversation-ui.test.cjs                      # simulated browser: voice conversation
+.venv/bin/python -m pytest -q tests/test_review_pipeline.py     # one judgment from scraper to approved drafts
+.venv/bin/python scripts/smoke.py                               # end to end against a real server, offline
 ```
+
+`scripts/smoke.py` builds a scratch knowledge base, starts `src/app.py serve
+--strict` and checks every step and four deliberate failures. `--live` uses the
+real Apertus and ElevenLabs settings and spends quota. See
+[SMOKE_TEST.md](SMOKE_TEST.md) for the production-like start and the manual
+checks.
 
 1. Click **Use this template** to create your own repository.
 
