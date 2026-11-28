@@ -202,7 +202,8 @@ class Smoke:
                    "run: npm --prefix src/frontend ci && npm --prefix src/frontend run build")
         self.check("supplied examples present (judgements/)", any((ROOT / "judgements").glob("Export_*.html")))
         if self.live:
-            ping = self.suva("llm-ping", env=self.env())
+            # Its own database: llm-ping migrates the KB it opens, which would leave init-db nothing to apply.
+            ping = self.suva("llm-ping", env=self.env(DATABASE_URL=f"sqlite:///{self.work / 'llm-ping.sqlite'}"))
             self.check("Apertus reachable (suva llm-ping)", ping.returncode == 0, ping.stderr.strip()[-200:])
 
     def pipeline(self) -> None:
