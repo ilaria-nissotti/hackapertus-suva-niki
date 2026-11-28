@@ -46,17 +46,24 @@ function RulingText({text}: {text: string}) {
 }
 
 function DecisionPreview({text, language}: {text: string; language: string | null}) {
+  const [expanded, setExpanded] = useState(false);
+  const continuationId = useId();
   const excerptLimit = 480;
   const firstLines = text.split('\n', 12).join('\n').trimEnd();
   const excerpt = firstLines.length <= excerptLimit ? firstLines :
     firstLines.slice(0, excerptLimit + 1).replace(/\s+\S*$/, '').slice(0, excerptLimit).trimEnd();
   return <div lang={language ?? undefined} className="decision-preview">
     {excerpt === text ? <RulingText text={text}/> : <>
-      <div className="decision-excerpt">
-        <p className="muted">Decision excerpt</p>
-        <RulingText text={excerpt + ' …'}/>
+      <p className="muted">Decision excerpt</p>
+      <RulingText text={excerpt + ' …'}/>
+      <Button className="decision-toggle" variant="outline" aria-expanded={expanded}
+        aria-controls={continuationId} onClick={() => setExpanded(value => !value)}>
+        {expanded ? 'Show less' : 'Read full decision'}
+      </Button>
+      <div id={continuationId} className="decision-continuation"
+        data-expanded={expanded} aria-hidden={!expanded}>
+        <div><RulingText text={text.slice(excerpt.length).trimStart()}/></div>
       </div>
-      <Collapsible label="Read full decision"><RulingText text={text}/></Collapsible>
     </>}
   </div>;
 }

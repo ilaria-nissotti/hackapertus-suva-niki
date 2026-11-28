@@ -107,7 +107,7 @@ test('long decisions show an excerpt until the reviewer expands them', async ({p
   await page.route('**/api/dashboard**', async route => {
     const data = await (await route.fetch()).json();
     if (data.selected) {
-      data.selected.decision = `${data.selected.decision}\n\n${'Weitere Anordnungen. '.repeat(40)}\n\nLetzte Anordnung.`;
+      data.selected.decision = `${data.selected.decision}\n\n${'Weitere Anordnungen. '.repeat(120)}\n\nLetzte Anordnung.`;
     }
     await route.fulfill({json: data});
   });
@@ -115,9 +115,24 @@ test('long decisions show an excerpt until the reviewer expands them', async ({p
   const casePane = page.getByRole('article', {name: SUBJECT});
   await expect(casePane.getByText('Decision excerpt', {exact: true})).toBeVisible();
   await expect(casePane.getByText('Letzte Anordnung.', {exact: true})).toBeHidden();
-  await casePane.getByText('Read full decision', {exact: true}).click();
-  await expect(casePane.getByText('Decision excerpt', {exact: true})).toBeHidden();
+  const toggle = casePane.getByRole('button', {name: 'Read full decision'});
+  const buttonTop = await toggle.evaluate(element => element.getBoundingClientRect().top + window.scrollY);
+  await toggle.click();
+  const collapse = casePane.getByRole('button', {name: 'Show less'});
+  await expect(collapse).toHaveAttribute('aria-expanded', 'true');
+  expect(await collapse.evaluate(element => element.getBoundingClientRect().top + window.scrollY))
+    .toBeCloseTo(buttonTop);
   await expect(casePane.getByText('Letzte Anordnung.', {exact: true})).toBeVisible();
+
+  const card = (await casePane.boundingBox())!;
+  await page.mouse.move(card.x + 60, Math.max(card.y + 60, 120));
+  await page.mouse.wheel(0, 700);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await expect.poll(() => casePane.evaluate(element => element.scrollTop)).toBe(0);
+
+  await collapse.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(casePane.getByText('Letzte Anordnung.', {exact: true})).toBeHidden();
 });
 
 test.describe('screenshots at 1440×900', () => {
