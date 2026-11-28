@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import date
+from pathlib import Path
 
 import httpx
 import pyarrow as pa
@@ -23,7 +24,7 @@ def parquet(raw, rows):
     pq.write_table(pa.table({k: [r[k] for r in full] for k in COLS}), p)
 
 
-def es_client(hits_by_day, html_calls):
+def es_client(hits_by_day, html_calls, listings=None):
     def handler(req):
         if req.url.path.endswith(".html"):
             html_calls.append(str(req.url))
@@ -33,6 +34,8 @@ def es_client(hits_by_day, html_calls):
             return httpx.Response(200, text=(f"<div class='para'>{docket}</div><div class='para'>Erwägungen:</div>"
                                              "<div class='para'>1.</div><div class='para'>Gründe.</div>"))
         rng = json.loads(req.content)["query"]["bool"]["filter"][1]["range"]["date"]
+        if listings is not None:
+            listings.append((rng["gte"], rng["lte"]))
         hits = [h for d, h in hits_by_day if rng["gte"] <= d <= rng["lte"]]
         return httpx.Response(200, json={"hits": {"total": {"value": len(hits)}, "hits": hits}})
     return PoliteClient(transport=httpx.MockTransport(handler), sleep=lambda s: None)
@@ -68,6 +71,30 @@ def test_fetch_window_picks_gaps_and_html(tmp_path, repo):
     assert len(html_calls) == 2
 
     assert repo.list_audit(kind="fetch_run")[0]["payload"]["window"] == "dev"
+
+
+def test_complete_pick_day_outside_window_is_not_listed_again(tmp_path, repo):
+    raw = tmp_path / "raw"
+    parquet(raw, [("8C_1/2025", "2025-10-02")])
+    ref = "8C_9/2024@2024-05-05"  # only entscheidsuche has this pick
+    repo.upsert_known_positive(dict(ref=ref, docket="8C_9/2024", court="bger", in_xlsx=1, in_exports=0))
+    window = Window("dev", date(2025, 10, 1), date(2025, 10, 7))
+    hits = [es_hit("8C_9/2024", "2024-05-05")]
+
+    first_listings = []
+    first = fetch(repo, raw, window, client=es_client(hits, [], first_listings))
+    assert ("2024-05-05", "2024-05-05") in first_listings and first.picks_found == 1
+
+    listings, html_calls = [], []
+    again = fetch(repo, raw, window, client=es_client(hits, html_calls, listings))
+    assert ("2024-05-05", "2024-05-05") not in listings and html_calls == []
+    assert (again.picks_found, again.picks_missing, again.errors) == (1, [], [])
+
+    # a pick whose stored HTML has gone is listed again so its attachment can be reloaded
+    Path(repo.get_judgement(ref)["html_path"]).unlink()
+    listings = []
+    fetch(repo, raw, window, client=es_client(hits, [], listings))
+    assert ("2024-05-05", "2024-05-05") in listings and Path(repo.get_judgement(ref)["html_path"]).is_file()
 
 
 def test_fetch_without_entscheidsuche(tmp_path, repo):

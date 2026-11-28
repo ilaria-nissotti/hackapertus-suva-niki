@@ -135,6 +135,8 @@ class _FetchRun:
             dates = {parse_iso_date(label["ref"].partition("@")[2]) for label in self.labels}
             dates.update(seen.date for seen in self.decisions.values() if seen.docket in self.dockets)
             for day in sorted(d for d in dates if d and not window.start <= d <= window.end):
+                if self._picks_complete(day):
+                    continue  # every pick decided that day already has text and HTML: listing it again changes nothing
                 for rec in entscheidsuche.list_bger(client, day, day):
                     if rec.docket in self.dockets:
                         self.record(rec, in_window=False)
@@ -143,6 +145,18 @@ class _FetchRun:
             self.report.errors.append(f"entscheidsuche listing: {exc}")
             log.error("fetch_source_failed source=entscheidsuche stage=listing status=%s error=%s detail=%s",
                       progress["status"], type(exc).__name__, exc)
+
+    def _picks_complete(self, day: date) -> bool:
+        keys = {label["ref"] for label in self.labels if label["ref"].endswith(f"@{day.isoformat()}")}
+        keys |= {key for key, seen in self.decisions.items() if seen.docket in self.dockets and seen.date == day}
+        stored = {key: self.repo.get_judgement(key) for key in keys}
+        if not all(row and usable_text(row["text"]) and row["html_path"] and Path(row["html_path"]).is_file()
+                   for row in stored.values()):
+            return False
+        for key, row in stored.items():  # keep the stored pick matchable without its listing
+            self.decisions.setdefault(key, _Decision(row["docket"], day, parse_iso_date(row["publication_date"]),
+                                                     has_text=True))
+        return True
 
     def match_picks(self) -> list[tuple[str, str]]:
         by_docket = defaultdict(list)
