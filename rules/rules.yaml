@@ -58,8 +58,8 @@
 #   python -m suva fit-weights    suggest weights and a floor from the data (written to rules.fitted.yaml)
 
 # base and weights: fitted on the training data (decisions 2025-10-01 to 2026-02-28)
-# with `python -m suva fit-weights`, then copied here. Adjust freely.
-base: -95         # display only: the score shown to lawyers is base + rule points. Not used to rank,
+# with `python -m suva fit-weights`, then copied here (28 Nov 2026). Adjust freely.
+base: -100        # display only: the score shown to lawyers is base + rule points. Not used to rank,
                   # select or decide which judgements the judge sees
 
 # What lawyers see: the top_n judgements of each period, most rule points first.
@@ -68,9 +68,9 @@ base: -95         # display only: the score shown to lawyers is base + rule poin
 #   Rule points depend on the weights: when the weights change, take the new floor from `fit-weights`.
 selection:
   top_n: 30               # judgements shown per period. Training picks found: 87% (`cv`, refit),
-                          # 93% with these weights (`evaluate`, equal points in random order)
-  floor_rule_points: 66   # in rule points, without base (= the former -29 points with base -95).
-                          # No relevant training judgement has fewer than 73 rule points (`evaluate` scores CSV)
+                          # 94% with these weights on train (`evaluate`; optimistic, they were fitted on train)
+  floor_rule_points: 76   # in rule points, without base; suggested by `fit-weights` with these weights
+                          # (keeps 90% of the relevant training judgements)
   per: month              # month | week | period (the whole input as one list)
 
 rules:
@@ -85,7 +85,7 @@ rules:
         - Istituto nazionale svizzero di assicurazione contro gli infortuni
         - CNA
         - INSAI
-    weight: 6
+    weight: 12
     explanation: "Suva is directly involved as a party."
     source: hypothesis
     evidence: ""
@@ -100,7 +100,7 @@ rules:
         - assurance accidents
         - assicurazione contro gli infortuni
         - assicurazione infortuni
-    weight: 51
+    weight: 47
     explanation: "The case is about accident insurance."
     source: hypothesis
     evidence: ""
@@ -111,8 +111,8 @@ rules:
     match:
       regex: " (UVG|UVV)$"
     case_sensitive: true
-    per_match: 6
-    max: 30
+    per_match: 5
+    max: 25
     explanation: "Applies accident insurance law (UVG/UVV articles cited)."
     source: hypothesis
     evidence: ""
@@ -137,7 +137,7 @@ rules:
     field: chamber
     match:
       any: [8C, 9C]
-    weight: 32
+    weight: 30
     explanation: "Decided by a social insurance division of the court."
     source: hypothesis
     evidence: ""
@@ -173,7 +173,7 @@ rules:
     field: dispositiv
     match:
       any: [nicht eingetreten, irrecevable, inammissibile]
-    weight: -43
+    weight: -39
     explanation: "Appeal declared inadmissible: no ruling on the substance."
     source: hypothesis
     evidence: ""
@@ -181,7 +181,7 @@ rules:
 # --- Significance: whether a case matters, not just what it is about ------------------------
 # The topic rules cannot tell a routine accident-insurance case from one Suva summarises.
 # These rules look at who appealed, how the court ruled and how much reasoning it needed.
-# Weights start at 0 (measured, not scored): `fit-weights` suggests them, `compare` shows the gain.
+# Weights fitted by `fit-weights` on the training split; `compare` and `cv` show the gain.
 
   - id: insurer_appeals
     group: significance
@@ -195,7 +195,7 @@ rules:
       none: [IV-Stelle, assurance-invalidité, assicurazione invalidità, Ufficio AI, IVSTA, Ausgleichskasse,
              caisse de compensation, cassa di compensazione, Arbeitslosenkasse, caisse de chômage, Vorsorge,
              prévoyance, previdenza, Pensionskasse, caisse de pensions]
-    weight: 0
+    weight: 14
     explanation: "The insurer appealed: the legal question likely matters beyond this case."
     source: data
     evidence: "train, accident/invalidity cases: 14/47 relevant vs 3/182 not relevant (docs/pitch_stats.py)"
@@ -206,7 +206,7 @@ rules:
     field: outcome
     match:
       any: [upheld, partly_upheld]
-    weight: 0
+    weight: 6
     explanation: "The appeal was upheld: the court corrected the lower court."
     source: data
     evidence: "train, accident/invalidity cases: 17/47 relevant vs 25/182 not relevant (docs/pitch_stats.py)"
@@ -217,7 +217,7 @@ rules:
     field: considerations
     match:
       regex: "Praxisänderung|Änderung der Rechtsprechung|Präzisierung der Rechtsprechung|Rechtsprechung (zu )?präzisieren|changement de jurisprudence|précis(er|e|ion de) (la|sa|notre) jurisprudence|cambiamento di giurisprudenza|precisa(re|zione della)? (la )?(sua )?giurisprudenza"
-    weight: 0
+    weight: 12
     explanation: "The court changes or clarifies its case law."
     source: hypothesis
     evidence: ""
@@ -228,20 +228,19 @@ rules:
     field: reasoning_pages
     match:
       min: 4
-    weight: 0
+    weight: 5
     explanation: "Detailed reasoning (4+ pages)."
     source: data
     evidence: "train, accident/invalidity cases: 32/47 relevant vs 64/182 not relevant (docs/pitch_stats.py)"
 
 # LLM judge (second stage, optional): Apertus rates candidates and gives a written reason.
 #   candidate_floor_rule_points: only judgements with at least this many rule points (no base) are sent
-#                           to the judge. 66 = the former -29 points with base -95, so the judge sees the
-#                           same candidates; like the selection floor, it depends on the weights
+#                           to the judge. Same as the selection floor; like it, it depends on the weights
 #   model: leave empty to use LLM_NAME from .env
 #   points: added to the rule points when a verdict exists (`evaluate --with-judge`)
 #   rubric: what Suva considers relevant, in plain words; the judge follows it
 judge:
-  candidate_floor_rule_points: 66
+  candidate_floor_rule_points: 76
   model:
   points:
     high: 10

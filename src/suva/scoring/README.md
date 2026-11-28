@@ -53,7 +53,7 @@ Equal points are ordered by key (in evaluation: not-relevant first, so ties neve
 numbers). The judge sees judgements with at least `judge.candidate_floor_rule_points` (also 66).
 
 Why 30 per month: Suva picked about 8 judgements a month in the training period. The top 30
-contain 87 % of them cross-validated (`cv`, refit) and 93 % with the current weights
+contain 87 % of them cross-validated (`cv`, refit) and 94 % with the current weights on train
 (`evaluate`, equal points in random order). `evaluate` prints this trade-off for other values
 of N, and `compare` prints the held-out confusion matrix (TP, FP, FN, TN) of the reading list.
 
