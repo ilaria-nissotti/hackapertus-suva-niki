@@ -39,7 +39,9 @@ One data pipeline feeds one review workspace:
    build (Vite; Node.js only at build time). It reads judgments and scores from
    the knowledge base (`data/kb.sqlite`) and keeps drafts, approvals and audio
    in its own `data/review.sqlite`. Apertus tasks run server-side; the browser
-   sees only saved case data and results.
+   sees only saved case data and results. The reviewer enters name, initials and
+   function when opening the app; every approval is signed with them, and the
+   export prints Suva's "Autor" line.
 
 ### Target architecture (mandatory)
 

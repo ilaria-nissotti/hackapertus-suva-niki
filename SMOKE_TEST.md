@@ -10,7 +10,8 @@ after a deployment, or after changing the environment.
 
 ## 1. Build and start in production mode
 
-The review app is a local, single-reviewer Flask server. `src/app.py serve` binds to `127.0.0.1` with debug off.
+The review app is a local Flask server; it first asks who is reviewing and signs approvals with that name.
+`src/app.py serve` binds to `127.0.0.1` with debug off.
 There is no separate WSGI server in the dependencies, so run it on the reviewer's machine and don't expose it to a
 network.
 

@@ -109,7 +109,15 @@ On startup the app logs its configuration and one line per missing setting to
 stderr (never keys). Without `--strict` it starts anyway and shows the problem
 on the drafts.
 
-Open [the local review dashboard](http://127.0.0.1:5050). The queue lists the
+Open [the local review dashboard](http://127.0.0.1:5050). It first asks who is
+reviewing: name, initials and, optionally, function (no account, no password;
+the browser remembers them). Every summary approved and every assessment saved
+is signed with that name, as in Suva's exports ("Autor: Frei Thomas (FRT),
+Rechtsanwalt"), and "Change" in the menu switches reviewer. The session cookie
+lasts 12 hours and is signed with `SUVA_SECRET_KEY` or, if unset, a random key
+kept in `data/session-secret`.
+
+The queue lists the
 judgments of the window, sorted by score, each with the rules that fired
 ("why it was selected" and "what counts against it"). Edit `rules/rules.yaml` and
 run `suva score` again to change the ranking; the app flags scores that are out
