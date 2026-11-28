@@ -4,6 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {CasePane, Status, views} from './CasePane';
 import {Library} from './Library';
 import {CaseSearch} from './CaseSearch';
+import type {PrecedentSearch} from './CaseSearch';
 import type {View} from './CasePane';
 import {displayDate, judgmentSubject} from './api';
 import {Button, Collapsible, Input} from './components/ui/controls';
@@ -38,6 +39,12 @@ function App() {
   const dataParams = new URLSearchParams(url);
   dataParams.delete('view');
   const dataQuery = dataParams.toString();
+  // The queue is only fetched while it is on screen; the other screens keep the last queue (search, filters, open
+  // case) so "Review queue" returns to it as the reviewer left it.
+  const queueQuery = screen === 'queue' ? dataQuery : null;
+  const lastQueue = useRef('/');
+  if (screen === 'queue') lastQueue.current = '/' + url;
+  const [precedents, setPrecedents] = useState<PrecedentSearch>({description: ''});
   const caseLoading = Boolean(caseKey && !selected && !error && loadedQuery !== dataQuery);
   const displayed = selected ?? (caseLoading ? dashboard?.selected : null);
   const lastCaseView = useRef({view, lang});
@@ -57,7 +64,10 @@ function App() {
   }
 
   function navigate(href: string) {
+    const screenOf = (search: string) => new URLSearchParams(search).get('screen');
+    const switching = screenOf(new URL(href, location.href).search) !== screenOf(location.search);
     history.pushState(null, '', href);
+    if (switching) window.scrollTo(0, 0);  // a new screen starts at its top, under the masthead
     context.current = location.search;
     setUrl(location.search);
     setError('');
@@ -81,17 +91,18 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (queueQuery === null) return;
     const abort = new AbortController();
     let timer: number;
     let pending = false;
     async function load() {
       try {
-        const response = await fetch('/api/dashboard?' + dataQuery, {signal: abort.signal});
+        const response = await fetch('/api/dashboard?' + queueQuery, {signal: abort.signal});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data: Dashboard = await response.json();
         if (abort.signal.aborted) return;
         setDashboard(data);
-        setLoadedQuery(dataQuery);
+        setLoadedQuery(queueQuery!);
         setError('');
         pending = data.active;
       } catch (failure) {
@@ -105,7 +116,7 @@ function App() {
     }
     void load();
     return () => { abort.abort(); window.clearTimeout(timer); };
-  }, [dataQuery, refresh]);
+  }, [queueQuery, refresh]);
 
   async function action(endpoint: string, body: FormData, onError?: (message: string) => void) {
     if (actionLock.current) return false;
@@ -154,7 +165,7 @@ function App() {
       <div className="topbar">
         <a className="brand" href="/" onClick={follow}><span aria-hidden="true">§</span> Judgment Review</a>
         <nav className="sections" aria-label="Sections">
-          <a href="/" onClick={follow} aria-current={screen === 'queue' ? 'page' : undefined}>Review queue</a>
+          <a href={lastQueue.current} onClick={follow} aria-current={screen === 'queue' ? 'page' : undefined}>Review queue</a>
           <a href="/?screen=precedents" onClick={follow} aria-current={screen === 'precedents' ? 'page' : undefined}>Find precedents</a>
           <a href="/?screen=library" onClick={follow} aria-current={screen === 'library' ? 'page' : undefined}>Library</a>
         </nav>
@@ -162,7 +173,7 @@ function App() {
       </div>
     </header>
     {screen === 'library' ? <main><Library params={params} link={link} follow={follow} navigate={navigate}/></main> :
-     screen === 'precedents' ? <main><CaseSearch follow={follow}/></main> :
+     screen === 'precedents' ? <main><CaseSearch follow={follow} search={precedents} onChange={setPrecedents}/></main> :
     <main>
       <div className="headline">
         <h1>Federal Court judgments</h1>

@@ -7,10 +7,16 @@ import type {CaseSearchHit} from './api';
 
 const KINDS: Record<string, string> = {statute: 'Same provision', article: 'Same article', bge: 'Same BGE', term: 'Term'};
 
+/** The last search, kept by the app (in memory only) so it survives a switch to another screen and back. */
+export type PrecedentSearch = {description: string; hits?: CaseSearchHit[]};
+
 /** Precedents for a lawyer's case: the judgements of the window ranked against a short case description. */
-export function CaseSearch({follow}: {follow: (event: MouseEvent<HTMLAnchorElement>) => void}) {
-  const [description, setDescription] = useState('');
-  const [hits, setHits] = useState<CaseSearchHit[]>();
+export function CaseSearch({follow, search, onChange}: {
+  follow: (event: MouseEvent<HTMLAnchorElement>) => void;
+  search: PrecedentSearch; onChange: (search: PrecedentSearch) => void;
+}) {
+  const {description, hits} = search;
+  const setDescription = (value: string) => onChange({description: value, hits});
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -23,7 +29,7 @@ export function CaseSearch({follow}: {follow: (event: MouseEvent<HTMLAnchorEleme
         body: JSON.stringify({description})});
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.message || 'Could not search. Try again.');
-      setHits(body.hits);
+      onChange({description, hits: body.hits});
     } catch (failure) {
       console.warn('case_search_failed', {reason: String(failure)});
       setMessage(failure instanceof Error ? failure.message : 'Could not search. Try again.');
