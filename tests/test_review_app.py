@@ -143,3 +143,11 @@ def test_rank_orders_by_score_then_points_with_unscored_last():
             dict(key="mid", score=55.0, points=None), dict(key="capped-high", score=100.0, points=90),
             dict(key="mid-tie", score=55.0, points=0)]
     assert [r["key"] for r in review_kb.rank(rows)] == ["capped-high", "capped-low", "mid", "mid-tie", "unscored"]
+
+
+def test_case_carries_what_the_court_decided_but_queue_rows_do_not(client, tmp_path):
+    key = seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", SUVA_CASE)
+    data = client.get("/api/dashboard", query_string={"case": key}).json
+    decision = data["selected"]["decision"]
+    assert decision.startswith("Demnach erkennt das Bundesgericht") and "abgewiesen" in decision
+    assert all("decision" not in row for row in data["rows"])
