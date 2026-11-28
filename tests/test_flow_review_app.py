@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 import app as dashboard
+import jobs
 import briefing
 from conftest import seed_kb
 from suva.parse.run import parse_all
@@ -24,7 +25,7 @@ JSON = {"Accept": "application/json"}
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(dashboard, "current_config", lambda: CONFIG)
+    monkeypatch.setattr(jobs, "current_config", lambda: CONFIG)
     monkeypatch.setattr(dashboard, "model_config", lambda: CONFIG)
     with patch.dict(dashboard.app.config, DATABASE=tmp_path / "review.sqlite", KB=tmp_path / "kb.sqlite",
                     TODAY=date(2026, 11, 27)):
@@ -38,7 +39,7 @@ def case(tmp_path):
 
 def add_draft(key, lang="de", summary="Die Beschwerde wird abgewiesen.", approved=None):
     record = dashboard.load_record(key)
-    version = dashboard.generation_version(record, CONFIG)
+    version = jobs.generation_version(record, CONFIG)
     with closing(dashboard.connect()) as db, db:
         db.execute("INSERT INTO results VALUES (?,?,?,?,NULL,?)",
                    (key, lang, version, json.dumps({"summary": summary, "quotes": []}), approved))
@@ -48,7 +49,7 @@ def add_draft(key, lang="de", summary="Die Beschwerde wird abgewiesen.", approve
 def result_row(key, kind, config=CONFIG):
     record = dashboard.load_record(key)
     with closing(dashboard.connect()) as db:
-        return dashboard.get_result(db, record, kind, config)
+        return jobs.get_result(db, record, kind, config)
 
 
 def page(client, **query):
@@ -356,8 +357,8 @@ def test_briefing_unknown_case(client, case):
 def test_briefing_is_queued_once(client, case, monkeypatch):
     monkeypatch.setattr(briefing, "voice_config", lambda lang: ("key", "voice"))
     pool = RecordingPool()
-    monkeypatch.setattr(dashboard, "pool", pool)
-    monkeypatch.setattr(dashboard, "pending", set())
+    monkeypatch.setattr(jobs, "pool", pool)
+    monkeypatch.setattr(jobs, "pending", set())
     add_draft(case, approved="Genehmigt.")
     assert post_briefing(client, case).status_code == 202
     assert post_briefing(client, case).status_code == 202
@@ -412,12 +413,12 @@ FACTS = {"facts": "f", "issues": "i", "reasoning": "r", "outcome": "o", "quotes"
 
 def test_process_drafts_after_facts_and_caches_both(client, case, monkeypatch):
     calls = []
-    monkeypatch.setattr(dashboard, "make_facts", lambda config, text: calls.append("facts") or dict(FACTS))
-    monkeypatch.setattr(dashboard, "draft", lambda config, record, facts, lang, ex: calls.append(lang)
+    monkeypatch.setattr(jobs, "make_facts", lambda config, text: calls.append("facts") or dict(FACTS))
+    monkeypatch.setattr(jobs, "draft", lambda config, record, facts, lang, ex: calls.append(lang)
                         or {"summary": "Zusammenfassung", "quotes": ["q"]})
-    assert dashboard.process(case, "de", config=CONFIG)
-    assert dashboard.process(case, "de", config=CONFIG)  # cached: no new calls
-    assert dashboard.process(case, "fr", config=CONFIG)  # reuses the stored facts
+    assert jobs.process(case, "de", config=CONFIG)
+    assert jobs.process(case, "de", config=CONFIG)  # cached: no new calls
+    assert jobs.process(case, "fr", config=CONFIG)  # reuses the stored facts
     assert calls == ["facts", "de", "fr"]
 
 
@@ -432,13 +433,13 @@ def test_concurrent_jobs_for_the_same_draft_call_the_model_once(client, case, mo
         time.sleep(0.2)
         return dict(FACTS)
 
-    monkeypatch.setattr(dashboard, "make_facts", slow_facts)
+    monkeypatch.setattr(jobs, "make_facts", slow_facts)
     results = []
     app_config = dict(dashboard.app.config)
 
     def job():
         with patch.dict(dashboard.app.config, app_config):
-            results.append(dashboard.process(case, "facts", config=CONFIG))
+            results.append(jobs.process(case, "facts", config=CONFIG))
 
     threads = [threading.Thread(target=job) for _ in range(3)]
     for t in threads:
@@ -449,15 +450,15 @@ def test_concurrent_jobs_for_the_same_draft_call_the_model_once(client, case, mo
 
 
 def test_different_drafts_do_not_share_a_lock(client, case, monkeypatch):
-    monkeypatch.setattr(dashboard, "make_facts", lambda config, text: dict(FACTS))
-    monkeypatch.setattr(dashboard, "draft", lambda config, record, facts, lang, ex: {"summary": lang, "quotes": ["q"]})
-    assert dashboard.process(case, "de", config=CONFIG)  # holds the de lock while it builds the facts
+    monkeypatch.setattr(jobs, "make_facts", lambda config, text: dict(FACTS))
+    monkeypatch.setattr(jobs, "draft", lambda config, record, facts, lang, ex: {"summary": lang, "quotes": ["q"]})
+    assert jobs.process(case, "de", config=CONFIG)  # holds the de lock while it builds the facts
     locks = list((dashboard.app.config["DATABASE"].parent / "summary-locks").iterdir())
     assert len(locks) == 2  # one lock file per (case, kind, version): de and facts
 
 
 def test_process_unknown_case_returns_false(client, case):
-    assert dashboard.process("8C_404/2026@2026-10-01", "de", config=CONFIG) is False
+    assert jobs.process("8C_404/2026@2026-10-01", "de", config=CONFIG) is False
 
 
 def test_process_shows_the_provider_status_from_bger_chat(client, case, monkeypatch):
@@ -475,21 +476,21 @@ def test_process_shows_the_provider_status_from_bger_chat(client, case, monkeypa
             raise APIStatusError("busy", response=httpx.Response(503, request=request), body=None)
 
     monkeypatch.setattr(bger, "LLMClient", FakeLLM)
-    monkeypatch.setattr(dashboard, "make_facts", lambda config, text: bger.chat(config, [], 10))
-    assert not dashboard.process(case, "facts", config=CONFIG | {"settings": None})
+    monkeypatch.setattr(jobs, "make_facts", lambda config, text: bger.chat(config, [], 10))
+    assert not jobs.process(case, "facts", config=CONFIG | {"settings": None})
     assert result_row(case, "facts")["error"] == "Provider HTTP 503"
 
 
 def test_process_plain_oserror_is_a_generic_retry_message(client, case, monkeypatch):
-    monkeypatch.setattr(dashboard, "make_facts", lambda c, t: (_ for _ in ()).throw(OSError("Apertus HTTP 429")))
-    assert not dashboard.process(case, "facts", config=CONFIG)
+    monkeypatch.setattr(jobs, "make_facts", lambda c, t: (_ for _ in ()).throw(OSError("Apertus HTTP 429")))
+    assert not jobs.process(case, "facts", config=CONFIG)
     assert result_row(case, "facts")["error"] == "Apertus request failed. Try again."
 
 
 def test_failed_facts_message_is_replaced_by_the_generic_draft_error(client, case, monkeypatch):
-    monkeypatch.setattr(dashboard, "make_facts",
+    monkeypatch.setattr(jobs, "make_facts",
                         lambda c, t: (_ for _ in ()).throw(ValueError("Apertus factual brief could not be verified")))
-    assert not dashboard.process(case, "de", config=CONFIG)
+    assert not jobs.process(case, "de", config=CONFIG)
     # process raises "The factual brief failed. Retry summary generation." but the stored message
     # is the generic one; the reviewer cannot tell that the factual brief step failed.
     assert result_row(case, "de")["error"] == "Could not generate a draft with verified source evidence. Try again."
@@ -504,14 +505,14 @@ def test_invalid_model_config_shows_the_real_reason(client, case, monkeypatch, u
     with patch("bger.load_settings") as settings:
         settings.return_value.llm_base_url = url
         settings.return_value.llm_name = name
-        assert dashboard.current_config() == {"LLM_NAME": "unconfigured", "error": message}
-        assert not dashboard.process(case, "de")  # config=None -> current_config()
+        assert jobs.current_config() == {"LLM_NAME": "unconfigured", "error": message}
+        assert not jobs.process(case, "de")  # config=None -> current_config()
     unconfigured = {"LLM_NAME": "unconfigured"}  # same generation version as with the error text
     assert result_row(case, "de", unconfigured)["error"] == message
 
 
 def test_unconfigured_without_a_reason_keeps_the_generic_message(client, case):
-    assert not dashboard.process(case, "de", config={"LLM_NAME": "unconfigured"})
+    assert not jobs.process(case, "de", config={"LLM_NAME": "unconfigured"})
     assert result_row(case, "de", {"LLM_NAME": "unconfigured"})["error"] == "Missing model configuration"
 
 
@@ -521,7 +522,7 @@ def test_process_without_source_text_needs_no_model(client, tmp_path):
     repo.upsert_judgement(SourceRecord("opencaselaw", "e", "8C_7/2026", date(2026, 10, 1), text=None))
     repo.close()
     key = "8C_7/2026@2026-10-01"
-    assert not dashboard.process(key, "facts", config=CONFIG)
+    assert not jobs.process(key, "facts", config=CONFIG)
     assert result_row(key, "facts")["error"] == "The judgment has no usable source text."
 
 
@@ -531,17 +532,17 @@ def test_summarize_top_only_drafts_relevant_and_review_cases(client, tmp_path, m
     high = seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", SUVA_CASE, score=90, band="high")
     seed_kb(tmp_path / "kb.sqlite", "8C_2/2026", SUVA_CASE, score=5, band="low")
     calls = []
-    monkeypatch.setattr(dashboard, "run_summary_job", lambda key, lang: calls.append((key, lang)) or True)
-    assert dashboard.summarize_top(10, 1) == 0
+    monkeypatch.setattr(jobs, "run_summary_job", lambda key, lang: calls.append((key, lang)) or True)
+    assert jobs.summarize_top(10, 1) == 0
     assert sorted(calls) == [(high, "de"), (high, "fr")]
 
 
 def test_summarize_top_reports_failures(client, case, monkeypatch, capsys):
-    monkeypatch.setattr(dashboard, "run_summary_job", lambda key, lang: lang == "de")
-    assert dashboard.summarize_top(10, 1) == 1
+    monkeypatch.setattr(jobs, "run_summary_job", lambda key, lang: lang == "de")
+    assert jobs.summarize_top(10, 1) == 1
     assert "1 tasks need retry" in capsys.readouterr().out
 
 
 def test_summarize_top_with_limit_zero_does_nothing(client, case, monkeypatch):
-    monkeypatch.setattr(dashboard, "run_summary_job", lambda *a: pytest.fail("should not run"))
-    assert dashboard.summarize_top(0, 1) == 0
+    monkeypatch.setattr(jobs, "run_summary_job", lambda *a: pytest.fail("should not run"))
+    assert jobs.summarize_top(0, 1) == 0

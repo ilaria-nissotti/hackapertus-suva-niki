@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 import app as dashboard
+import jobs
 from conftest import seed_kb
 from suva.sources.base import SourceRecord
 from suva.storage import SQLiteRepository
@@ -112,24 +113,24 @@ def test_failed_job_releases_its_slot_and_attempts_the_other_language(monkeypatc
         def submit(self, task):
             task()
 
-    monkeypatch.setattr(dashboard, "process", process)
-    monkeypatch.setattr(dashboard, "pool", InlineExecutor())
-    monkeypatch.setattr(dashboard, "pending", set())
-    dashboard.enqueue(key, ("de", "fr"))
+    monkeypatch.setattr(jobs, "process", process)
+    monkeypatch.setattr(jobs, "pool", InlineExecutor())
+    monkeypatch.setattr(jobs, "pending", set())
+    jobs.enqueue(key, ("de", "fr"))
     assert attempted == ["de", "fr"]
-    assert dashboard.pending == set()
-    dashboard.enqueue(key, ("de",))
+    assert jobs.pending == set()
+    jobs.enqueue(key, ("de",))
     assert attempted == ["de", "fr", "de"]
-    assert dashboard.pending == set()
+    assert jobs.pending == set()
 
 
 def test_missing_source_text_is_reported_without_a_model_call(client, tmp_path, monkeypatch):
     key = seed_kb(tmp_path / "kb.sqlite", "8C_1/2026", "")
-    monkeypatch.setattr(dashboard, "model_config", lambda: {"LLM_NAME": "test-model"})
+    monkeypatch.setattr(jobs, "model_config", lambda: {"LLM_NAME": "test-model"})
 
     def unexpected_call(*args):
         pytest.fail("A missing ruling should never reach Apertus")
 
-    monkeypatch.setattr(dashboard, "make_facts", unexpected_call)
-    assert not dashboard.process(key, "de")
+    monkeypatch.setattr(jobs, "make_facts", unexpected_call)
+    assert not jobs.process(key, "de")
     assert page(client, case=key)["selected"]["de"]["error"] == "The judgment has no usable source text."

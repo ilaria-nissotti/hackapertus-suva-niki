@@ -16,6 +16,7 @@ import httpx
 import pytest
 
 import app as dashboard
+import jobs
 import briefing
 import bger
 import summaries
@@ -45,7 +46,7 @@ def kb_path(tmp_path):
 
 @pytest.fixture
 def client(tmp_path, kb_path, monkeypatch):
-    monkeypatch.setattr(dashboard, "current_config", lambda: CONFIG)
+    monkeypatch.setattr(jobs, "current_config", lambda: CONFIG)
     with patch.dict(dashboard.app.config, DATABASE=tmp_path / "review.sqlite", KB=kb_path, TODAY=date(2026, 11, 27)):
         yield dashboard.app.test_client()
 
@@ -250,7 +251,7 @@ def test_llm_reply_with_null_content_is_empty_text(tmp_path):
 
 def add_draft(key):
     record = dashboard.load_record(key)
-    version = dashboard.generation_version(record, CONFIG)
+    version = jobs.generation_version(record, CONFIG)
     with closing(dashboard.connect()) as db, db:
         db.execute("INSERT INTO results VALUES (?,?,?,?,NULL,NULL)", (key, "de", version, json.dumps({"summary": "s"})))
     return version
@@ -307,11 +308,11 @@ def test_simultaneous_uploads_of_different_texts_store_exactly_one(client, kb_pa
 
 def test_duplicate_summarize_requests_queue_one_job_per_language(client, case, monkeypatch):
     submitted = []
-    monkeypatch.setattr(dashboard, "pool", SimpleNamespace(submit=submitted.append))
-    monkeypatch.setattr(dashboard, "pending", set())
+    monkeypatch.setattr(jobs, "pool", SimpleNamespace(submit=submitted.append))
+    monkeypatch.setattr(jobs, "pending", set())
     for _ in range(5):
         assert client.post("/run", headers=JSON, data={"case": case, "action": "summarize"}).status_code == 200
-    assert len(submitted) == 1 and dashboard.pending == {(case, "de"), (case, "fr")}
+    assert len(submitted) == 1 and jobs.pending == {(case, "de"), (case, "fr")}
 
 
 def test_summary_jobs_for_different_cases_run_side_by_side(monkeypatch):
@@ -323,10 +324,10 @@ def test_summary_jobs_for_different_cases_run_side_by_side(monkeypatch):
         done.append(key)
         return True
 
-    monkeypatch.setattr(dashboard, "run_summary_job", job)
-    monkeypatch.setattr(dashboard, "pending", set())
-    dashboard.enqueue("8C_1/2026@2026-10-01", ["de"])
-    dashboard.enqueue("8C_2/2026@2026-10-02", ["de"])
+    monkeypatch.setattr(jobs, "run_summary_job", job)
+    monkeypatch.setattr(jobs, "pending", set())
+    jobs.enqueue("8C_1/2026@2026-10-01", ["de"])
+    jobs.enqueue("8C_2/2026@2026-10-02", ["de"])
     for _ in range(100):
         if len(done) == 2:
             break
@@ -533,10 +534,10 @@ def test_apertus_timeouts_and_dropped_connections_become_a_generic_oserror(monke
 
 
 def test_apertus_timeout_during_a_summary_job_is_stored_as_retryable(client, case, monkeypatch):
-    monkeypatch.setattr(dashboard, "make_facts", lambda c, t: (_ for _ in ()).throw(TimeoutError("slow")))
-    assert dashboard.process(case, "facts", config=CONFIG) is False
+    monkeypatch.setattr(jobs, "make_facts", lambda c, t: (_ for _ in ()).throw(TimeoutError("slow")))
+    assert jobs.process(case, "facts", config=CONFIG) is False
     record = dashboard.load_record(case)
     with closing(dashboard.connect()) as db:
-        assert dashboard.get_result(db, record, "facts", CONFIG)["error"] == "Apertus request failed. Try again."
-    monkeypatch.setattr(dashboard, "make_facts", lambda c, t: {"facts": "f"})
-    assert dashboard.process(case, "facts", config=CONFIG) is True  # a failed row does not block the retry
+        assert jobs.get_result(db, record, "facts", CONFIG)["error"] == "Apertus request failed. Try again."
+    monkeypatch.setattr(jobs, "make_facts", lambda c, t: {"facts": "f"})
+    assert jobs.process(case, "facts", config=CONFIG) is True  # a failed row does not block the retry

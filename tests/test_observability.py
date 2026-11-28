@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 import app as dashboard
+import jobs
 import briefing
 import summaries
 from conftest import fake_client, make_settings, seed_kb
@@ -29,7 +30,7 @@ SECRET = "sk-test-secret-key"
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(dashboard, "current_config", lambda: CONFIG)
+    monkeypatch.setattr(jobs, "current_config", lambda: CONFIG)
     monkeypatch.setattr(dashboard, "model_config", lambda: CONFIG)
     with patch.dict(dashboard.app.config, DATABASE=tmp_path / "review.sqlite", KB=tmp_path / "kb.sqlite",
                     TODAY=date(2026, 11, 27)):
@@ -49,15 +50,15 @@ def add_approved_draft(key):
     record = dashboard.load_record(key)
     with closing(dashboard.connect()) as db, db:
         db.execute("INSERT INTO results VALUES (?,?,?,?,NULL,?)",
-                   (key, "de", dashboard.generation_version(record, CONFIG), '{"summary": "s"}', "Genehmigt."))
+                   (key, "de", jobs.generation_version(record, CONFIG), '{"summary": "s"}', "Genehmigt."))
 
 
 def test_crashed_background_briefing_is_logged_and_shown_as_an_error(client, case, monkeypatch, caplog):
     add_approved_draft(case)
     monkeypatch.setattr(briefing, "voice_config", lambda lang: (SECRET, "voice"))
     tasks = []
-    monkeypatch.setattr(dashboard, "pool", SimpleNamespace(submit=tasks.append))
-    monkeypatch.setattr(dashboard, "pending", set())
+    monkeypatch.setattr(jobs, "pool", SimpleNamespace(submit=tasks.append))
+    monkeypatch.setattr(jobs, "pending", set())
     monkeypatch.setattr(briefing, "generate", lambda *a: (_ for _ in ()).throw(RuntimeError("lock dir gone")))
     with caplog.at_level(logging.INFO):
         assert client.post("/briefing", headers=JSON, data={"case": case, "lang": "de"}).status_code == 202
@@ -83,18 +84,18 @@ def test_briefing_provider_failure_is_logged_with_stage_and_status(client, case,
 
 
 def test_failed_summary_is_logged_without_the_judgment_text(client, case, monkeypatch, caplog):
-    monkeypatch.setattr(dashboard, "make_facts", lambda c, t: (_ for _ in ()).throw(OSError("Apertus HTTP 503")))
+    monkeypatch.setattr(jobs, "make_facts", lambda c, t: (_ for _ in ()).throw(OSError("Apertus HTTP 503")))
     with caplog.at_level(logging.INFO):
-        assert dashboard.process(case, "facts", config=CONFIG) is False
+        assert jobs.process(case, "facts", config=CONFIG) is False
     line, = [m for m in messages(caplog) if m.startswith("summary_failed")]
     assert f"case={case}" in line and "kind=facts" in line and "error=OSError" in line
     assert "Der Versicherte" not in caplog.text
 
 
 def test_ready_summary_and_approval_are_logged(client, case, monkeypatch, caplog):
-    monkeypatch.setattr(dashboard, "make_facts", lambda c, t: {"facts": "f"})
+    monkeypatch.setattr(jobs, "make_facts", lambda c, t: {"facts": "f"})
     with caplog.at_level(logging.INFO):
-        dashboard.process(case, "facts", config=CONFIG)
+        jobs.process(case, "facts", config=CONFIG)
         client.post("/approve", headers=JSON, data={"case": case, "lang": "de", "summary": "Text", "version": "v"})
     assert f"summary_ready case={case} kind=facts model=m" in messages(caplog)
     assert f"approve_conflict case={case} lang=de reason=no_draft" in messages(caplog)

@@ -12,6 +12,7 @@ from urllib.error import HTTPError
 from datetime import date
 
 import app as dashboard
+import jobs
 import briefing
 from conftest import seed_kb
 
@@ -26,13 +27,14 @@ class BriefingTests(TestCase):
         self.enter(patch.dict(dashboard.app.config, DATABASE=Path(workspace) / "review.sqlite",
                               KB=Path(workspace) / "kb.sqlite", TODAY=date(2026, 11, 27)))
         self.enter(patch("app.model_config", return_value={"LLM_NAME": "test-model"}))
+        self.enter(patch("jobs.model_config", return_value={"LLM_NAME": "test-model"}))
         self.enter(patch("briefing.voice_config", side_effect=lambda lang: ("secret", f"voice-{lang}")))
         self.client = dashboard.app.test_client()
         record = dashboard.load_record(self.case)
         with closing(dashboard.connect()) as db, db:
             for lang in ("de", "fr"):
                 db.execute("INSERT INTO results VALUES (?, ?, ?, ?, NULL, NULL)",
-                           (self.case, lang, dashboard.version(record, "test-model"),
+                           (self.case, lang, jobs.version(record, "test-model"),
                             json.dumps({"summary": f"Draft {lang}", "quotes": [self.evidence]})))
 
     def enter(self, manager):

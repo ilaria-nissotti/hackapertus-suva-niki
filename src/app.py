@@ -6,11 +6,8 @@ summary drafts, approvals, audio briefings and cases a reviewer added by hand.
 """
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing, contextmanager
+from contextlib import closing
 from datetime import date
-import fcntl
-import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
@@ -23,9 +20,11 @@ from flask import Flask, abort, jsonify, redirect, request, send_file, send_from
 
 import briefing
 import conversation
+import jobs
 import review_kb
+import review_store
 from bger import ROOT, model_config
-from summaries import VERSION, draft, make_facts
+from jobs import connect, kb, load_record, window
 from suva.config import configure_logging, load_settings
 from suva.sources.base import DOCKET_RE
 
@@ -37,10 +36,7 @@ app.config.update(MAX_CONTENT_LENGTH=4 * 1024 * 1024,
                   DATABASE=_settings.data_dir / "review.sqlite",
                   KB=_settings.sqlite_path,
                   TODAY=None)  # reference date of the challenge window (None = today)
-# Summary and briefing jobs run side by side, like summarize-top; summary_lock stops duplicate Apertus calls.
-pool = ThreadPoolExecutor(max_workers=4)
-pending = set()
-pending_lock = threading.Lock()
+jobs.settings = app.config  # the jobs read DATABASE, KB and TODAY from here
 queue_read_lock = threading.Lock()
 
 
@@ -51,43 +47,6 @@ def reject_cross_site_writes():
         if (origin and origin.rstrip("/") != request.host_url.rstrip("/")
                 or request.headers.get("Sec-Fetch-Site") == "cross-site"):
             abort(403)
-
-
-def connect():
-    """The app's review-state database (drafts, approvals, briefings, added cases)."""
-    path = Path(app.config["DATABASE"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=20)
-    db.row_factory = sqlite3.Row
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS results (
-            case_key TEXT NOT NULL, kind TEXT NOT NULL, version TEXT NOT NULL,
-            payload TEXT, error TEXT, approved TEXT,
-            PRIMARY KEY (case_key, kind, version)
-        );
-        CREATE TABLE IF NOT EXISTS briefings (
-            cache_key TEXT PRIMARY KEY, script TEXT, evidence TEXT, mp3 BLOB, error TEXT
-        );
-        CREATE TABLE IF NOT EXISTS review_cases (
-            case_key TEXT PRIMARY KEY, added_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-    """)
-    return db
-
-
-def kb():
-    return review_kb.open_kb(app.config["KB"])
-
-
-def window():
-    return review_kb.window_for(app.config["TODAY"])
-
-
-def load_record(key):
-    if not isinstance(key, str):
-        return None
-    with closing(kb()) as repo:
-        return review_kb.get_record(repo, key)
 
 
 def valid_date(value):
@@ -105,124 +64,7 @@ def safe_url(value):
     return None
 
 
-def version(record, model, endpoint=""):
-    digest = hashlib.sha256(record["full_text"].encode()).hexdigest()
-    return f"{VERSION}:{model}:{hashlib.sha256(endpoint.encode()).hexdigest()}:{digest}"
-
-
-def current_config():
-    try:
-        return model_config()
-    except ValueError as exc:
-        return {"LLM_NAME": "unconfigured", "error": str(exc)}
-
-
-def generation_version(record, config):
-    return version(record, config["LLM_NAME"], config.get("LLM_BASE_URL", ""))
-
-
-def get_result(db, record, kind, config):
-    return db.execute("SELECT * FROM results WHERE case_key=? AND kind=? AND version=?",
-                      (record["key"], kind, generation_version(record, config))).fetchone()
-
-
 app.register_blueprint(conversation.routes(load_record))
-
-
-@contextmanager
-def summary_lock(record, kind, config):
-    """One generation per draft at a time, also across the web server and `summarize-top`."""
-    lock_dir = Path(app.config["DATABASE"]).parent / "summary-locks"
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    name = hashlib.sha256(f"{record['key']}\0{kind}\0{generation_version(record, config)}".encode()).hexdigest()
-    with (lock_dir / name).open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
-
-
-def process(key, kind, *, record=None, config=None):
-    record = load_record(key) if record is None else record
-    if record is None:
-        return False
-    config = current_config() if config is None else config
-    with summary_lock(record, kind, config), closing(connect()) as db:
-        model = config["LLM_NAME"]
-        existing = get_result(db, record, kind, config)
-        if existing and existing["payload"]:
-            return True
-        payload = None
-        error = None
-        try:
-            if not record["full_text"].strip():
-                raise ValueError("The judgment has no usable source text.")
-            if model == "unconfigured":
-                raise ValueError("Missing model configuration")
-            if kind == "facts":
-                payload = make_facts(config, record["full_text"])
-            else:
-                if not process(key, "facts", record=record, config=config):
-                    raise ValueError("The factual brief failed. Retry summary generation.")
-                facts = json.loads(get_result(db, record, "facts", config)["payload"])
-                with closing(kb()) as repo:
-                    style_examples = repo.list_examples(split="fewshot")
-                payload = draft(config, record, facts, kind, style_examples)
-        except (OSError, ValueError, TypeError, KeyError) as exc:
-            # Error responses and exception arguments can contain provider/request data.
-            error = ("The judgment has no usable source text." if not record["full_text"].strip() else
-                     f"Provider HTTP {exc.code}" if hasattr(exc, "code") else
-                     config.get("error", "Missing model configuration") if model == "unconfigured" else
-                     "Apertus request failed. Try again." if isinstance(exc, OSError) else
-                     "Could not generate a draft with verified source evidence. Try again.")
-            app.logger.warning("summary_failed case=%s kind=%s error=%s reason=%r", key, kind,
-                               type(exc).__name__, error)
-        with db:
-            db.execute("""INSERT INTO results (case_key, kind, version, payload, error)
-                VALUES (?, ?, ?, ?, ?) ON CONFLICT(case_key,kind,version)
-                DO UPDATE SET payload=excluded.payload, error=excluded.error
-                WHERE results.payload IS NULL""",
-                       (key, kind, generation_version(record, config),
-                        json.dumps(payload, ensure_ascii=False) if payload else None, error))
-        if payload is not None:
-            app.logger.info("summary_ready case=%s kind=%s model=%s", key, kind, model)
-        return payload is not None
-
-
-JOB_CRASHED = "The summary job failed unexpectedly. Try again."
-
-
-def run_summary_job(key, kind):
-    try:
-        return process(key, kind)
-    except Exception as exc:
-        app.logger.error("summary_job_crashed case=%s kind=%s error=%s", key, kind, type(exc).__name__)
-        try:  # record the failure where the dashboard looks, so the browser shows it instead of nothing
-            record = load_record(key)
-            if record is not None:
-                with closing(connect()) as db, db:
-                    db.execute("""INSERT INTO results (case_key, kind, version, payload, error)
-                        VALUES (?, ?, ?, NULL, ?) ON CONFLICT(case_key,kind,version)
-                        DO UPDATE SET error=excluded.error WHERE results.payload IS NULL""",
-                               (key, kind, generation_version(record, current_config()), JOB_CRASHED))
-        except Exception as store_exc:  # noqa: BLE001 - the original failure is already logged
-            app.logger.error("summary_error_not_stored case=%s kind=%s error=%s", key, kind,
-                             type(store_exc).__name__)
-        return False
-
-
-def enqueue(key, kinds):
-    with pending_lock:
-        tasks = [kind for kind in kinds if (key, kind) not in pending]
-        pending.update((key, kind) for kind in tasks)
-
-    def run():
-        for kind in tasks:
-            try:
-                run_summary_job(key, kind)
-            finally:
-                with pending_lock:
-                    pending.discard((key, kind))
-    if tasks:
-        pool.submit(run)
 
 
 def present(db, record, config):
@@ -230,9 +72,8 @@ def present(db, record, config):
     for kind in ("de", "fr"):
         # Read the pending flag before the row: a job commits its row before clearing the flag, so a response
         # never says "not active" while still missing the result it just committed.
-        with pending_lock:
-            active = (record["key"], kind) in pending
-        row = get_result(db, record, kind, config)
+        active = jobs.is_pending((record["key"], kind))
+        row = jobs.get_result(db, record, kind, config)
         result[kind] = {
             "version": row["version"] if row and row["payload"] else None,
             "data": json.loads(row["payload"]) if row and row["payload"] else {},
@@ -245,8 +86,8 @@ def present(db, record, config):
 
 def briefing_context(db, record, lang, config):
     api_key, voice = briefing.voice_config(lang)
-    summary = get_result(db, record, lang, config)
-    ctx = briefing.context(record, summary, config["LLM_NAME"], generation_version(record, config), lang, voice)
+    summary = jobs.get_result(db, record, lang, config)
+    ctx = briefing.context(record, summary, config["LLM_NAME"], jobs.generation_version(record, config), lang, voice)
     return ctx, api_key, voice
 
 
@@ -255,10 +96,8 @@ def briefing_status(db, record, lang, config):
     if not ctx:
         return {}
     key, _ = ctx
-    with pending_lock:  # before the row, as in present()
-        active = ("briefing", key) in pending
-    row = db.execute("""SELECT script, evidence, mp3 IS NOT NULL AS ready, error
-                        FROM briefings WHERE cache_key=?""", (key,)).fetchone()
+    active = jobs.is_pending(("briefing", key))  # before the row, as in present()
+    row = review_store.briefing_status(db, key)
     return {"key": key, "active": active, "configured": bool(api_key),
             "ready": bool(row and row["ready"]), "error": row["error"] if row else None,
             "script": row["script"] if row else None,
@@ -301,14 +140,14 @@ def dashboard_data():
     selected_key = request.args.get("case")
     current = window()
     with closing(connect()) as db:
-        extra = [row[0] for row in db.execute("SELECT case_key FROM review_cases")]
+        extra = review_store.added_cases(db)
         with closing(kb()) as repo:
             digest = review_kb.current_rules_hash()
             # Concurrent SQLite row scans contend heavily in the Python driver.
             with queue_read_lock:
                 records = review_kb.window_records(repo, current, extra, digest)
             selected = review_kb.get_record(repo, selected_key, digest) if selected_key else None
-        config = current_config()
+        config = jobs.current_config()
         if selected:
             selected = present(db, selected, config)
         audio = briefing_status(db, selected, lang, config) if selected else {}
@@ -351,7 +190,7 @@ def prepare_briefing(key, lang):
         raise ValueError("Judgment not found.")
     with closing(connect()) as db:
         ctx, api_key, voice = briefing_context(db, record, lang, config)
-        summary = get_result(db, record, lang, config)
+        summary = jobs.get_result(db, record, lang, config)
         if not summary or not summary["approved"]:
             raise ValueError("Approve this language’s summary before generating audio.")
         if not ctx or not api_key:
@@ -372,30 +211,7 @@ def queue_briefing():
         message = str(exc) if isinstance(exc, ValueError) else "Could not load briefing configuration."
         app.logger.info("briefing_rejected case=%s lang=%s reason=%r", key, lang, message)
     else:
-        task = ("briefing", cache_key)
-
-        def run():
-            try:
-                briefing.generate(*args)
-            except Exception as exc:  # a pool thread would swallow it: log it and show an error in the UI
-                app.logger.error("briefing_job_crashed case=%s lang=%s cache_key=%s error=%s", key, lang,
-                                 cache_key[:12], type(exc).__name__)
-                try:
-                    with closing(connect()) as db, db:
-                        db.execute("""INSERT INTO briefings (cache_key, error) VALUES (?, ?)
-                            ON CONFLICT(cache_key) DO UPDATE SET error=excluded.error""",
-                                   (cache_key, "Briefing failed unexpectedly. Try again."))
-                except sqlite3.Error as db_exc:
-                    app.logger.error("briefing_error_not_stored cache_key=%s error=%s", cache_key[:12],
-                                     type(db_exc).__name__)
-            finally:
-                with pending_lock:
-                    pending.discard(task)
-
-        with pending_lock:
-            if task not in pending:
-                pending.add(task)
-                pool.submit(run)
+        jobs.enqueue_briefing(key, lang, cache_key, args)
     if wants_json():
         return action_result(key, message, 400 if message else 202)
     return redirect(url_for("dashboard", case=key, lang=lang, message=message,
@@ -411,13 +227,13 @@ def play_briefing(cache_key):
     if not record:
         abort(404)
     with closing(connect()) as db:
-        ctx, _, _ = briefing_context(db, record, lang, current_config())
+        ctx, _, _ = briefing_context(db, record, lang, jobs.current_config())
         if not ctx or ctx[0] != cache_key:
             abort(404)
-        row = db.execute("SELECT mp3 FROM briefings WHERE cache_key=?", (cache_key,)).fetchone()
-        if not row or not row["mp3"]:
+        audio = review_store.briefing_audio(db, cache_key)
+        if not audio:
             abort(404)
-        response = send_file(BytesIO(row["mp3"]), mimetype="audio/mpeg",
+        response = send_file(BytesIO(audio), mimetype="audio/mpeg",
                              conditional=True, etag=cache_key)
         response.headers["Cache-Control"] = "private, no-store"
         return response
@@ -444,7 +260,7 @@ def run_case():
         abort(400)
     if load_record(key) is None:
         abort(404)
-    enqueue(key, ("de", "fr"))
+    jobs.enqueue(key, ("de", "fr"))
     return jump(key)
 
 
@@ -471,8 +287,8 @@ def add_case():
                     dates = ", ".join(k.partition("@")[2] for k in keys)
                     raise ValueError(f"{docket} has several decisions ({dates}). Enter the decision date.")
                 key = keys[0]
-        with closing(connect()) as db, db:
-            db.execute("INSERT OR IGNORE INTO review_cases (case_key) VALUES (?)", (key,))
+        with closing(connect()) as db:
+            review_store.add_case(db, key)
     except (OSError, UnicodeDecodeError) as exc:
         app.logger.info("add_case_rejected docket=%r error=%s", docket[:40], type(exc).__name__)
         return jump(message="Could not add that judgment. Upload a UTF-8 text file.")
@@ -495,18 +311,16 @@ def approve():
     record = load_record(key)
     if record is None:
         abort(404)
-    with closing(connect()) as db, db:
-        row = get_result(db, record, lang, current_config())
+    with closing(connect()) as db:
+        row = jobs.get_result(db, record, lang, jobs.current_config())
         if not row or not row["payload"] or request.form.get("version") != row["version"]:
             app.logger.info("approve_conflict case=%s lang=%s reason=%s", key, lang,
                             "no_draft" if not row or not row["payload"] else "version_changed")
             return action_result(key, "The draft changed. Reload it and review it before approving.", 409)
         # Only overwrite the approval this page saw: a second tab saving the same draft version must reload
         # instead of silently replacing the first tab's edit. The condition makes the check atomic.
-        saved = db.execute("""UPDATE results SET approved=? WHERE case_key=? AND kind=? AND version=?
-                              AND COALESCE(approved, '') = ?""",
-                           (summary, key, lang, row["version"], request.form.get("previous_approved", "")))
-        if saved.rowcount != 1:
+        if not review_store.approve(db, key, lang, row["version"], summary,
+                                    request.form.get("previous_approved", "")):
             app.logger.info("approve_conflict case=%s lang=%s reason=approval_changed", key, lang)
             return action_result(key, "Another approval was saved for this draft. Reload it and review it "
                                       "before approving.", 409)
@@ -514,28 +328,6 @@ def approve():
     if wants_json():
         return action_result(key, "Summary approved.")
     return redirect(url_for("dashboard", case=key, lang=lang, message="Summary approved."), code=303)
-
-
-def summarize_top(limit, workers):
-    """Draft DE and FR summaries for the best-scored judgements of the window."""
-    with closing(kb()) as repo:
-        records = review_kb.window_records(repo, window())
-    ranked = sorted((r for r in records if r["status"] in ("Relevant", "Review")),
-                    key=lambda r: (-r["score"], -(r["points"] or 0)))[:limit]  # same order as the dashboard
-    stale = sum(r["status"] == "Stale" for r in records)
-    if stale:
-        print(f"note: {stale} judgements have stale scores: run `python -m suva score` first", file=sys.stderr)
-
-    def summarize(row):
-        return sum(not run_summary_job(row["key"], lang) for lang in ("de", "fr"))
-
-    failed = 0
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        for index, errors in enumerate(executor.map(summarize, ranked), 1):
-            failed += errors
-            print(f"{index}/{len(ranked)} cases; {failed} tasks need retry", flush=True)
-    print(f"{len(ranked)} cases processed; {failed} tasks need retry.")
-    return int(bool(failed))
 
 
 def startup_problems():
@@ -569,7 +361,7 @@ def startup_problems():
 def check_startup(strict):
     """Log the configuration once at startup; with --strict, refuse to serve without the required parts."""
     required, optional = startup_problems()
-    config = current_config()
+    config = jobs.current_config()
     app.logger.info("startup_config kb=%s review_db=%s model=%s llm_host=%s today=%s", app.config["KB"],
                     app.config["DATABASE"], config["LLM_NAME"], urlsplit(config.get("LLM_BASE_URL", "")).hostname,
                     app.config["TODAY"] or "today")
@@ -608,7 +400,7 @@ def main():
             return 2
         app.run(host="127.0.0.1", port=args.port)
     elif args.command == "summarize-top":
-        return summarize_top(args.limit, args.workers)
+        return jobs.summarize_top(args.limit, args.workers)
     elif args.command == "briefing":
         failed = False
         for lang in briefing.LANGUAGES if args.lang == "both" else (args.lang,):
@@ -622,8 +414,8 @@ def main():
                 print(f"{args.case} {lang}: briefing ready")
             else:
                 with closing(connect()) as db:
-                    error = db.execute("SELECT error FROM briefings WHERE cache_key=?", (key,)).fetchone()
-                print(f"{lang}: {error['error']}", file=sys.stderr)
+                    error = review_store.briefing_error(db, key)
+                print(f"{lang}: {error}", file=sys.stderr)
                 failed = True
         return int(failed)
     return 0

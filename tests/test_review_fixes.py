@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import app as dashboard
+import jobs
 from conftest import seed_kb
 from test_review_app import SUVA_CASE
 
@@ -17,9 +18,9 @@ JSON = {"Accept": "application/json"}
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(dashboard, "current_config", lambda: CONFIG)
+    monkeypatch.setattr(jobs, "current_config", lambda: CONFIG)
     monkeypatch.setattr(dashboard, "model_config", lambda: CONFIG)
-    monkeypatch.setattr(dashboard, "pending", set())
+    monkeypatch.setattr(jobs, "pending", set())
     with patch.dict(dashboard.app.config, DATABASE=tmp_path / "review.sqlite", KB=tmp_path / "kb.sqlite",
                     TODAY=date(2026, 11, 27)):
         yield dashboard.app.test_client()
@@ -32,7 +33,7 @@ def case(tmp_path):
 
 def store_draft(key, lang="de", summary="Die Beschwerde wird abgewiesen.", approved=None):
     record = dashboard.load_record(key)
-    version = dashboard.generation_version(record, CONFIG)
+    version = jobs.generation_version(record, CONFIG)
     with closing(dashboard.connect()) as db, db:
         db.execute("INSERT INTO results VALUES (?,?,?,?,NULL,?)",
                    (key, lang, version, json.dumps({"summary": summary, "quotes": []}), approved))
@@ -42,17 +43,17 @@ def store_draft(key, lang="de", summary="Die Beschwerde wird abgewiesen.", appro
 # --- 1. a job finishing while the dashboard reads must not stop the browser's polling -------------
 
 def test_draft_finishing_during_the_dashboard_read_is_never_reported_as_idle_and_empty(client, case, monkeypatch):
-    dashboard.pending.add((case, "de"))
-    real_get_result = dashboard.get_result
+    jobs.pending.add((case, "de"))
+    real_get_result = jobs.get_result
 
     def job_finishes_right_after_the_read(db, record, kind, config):
         row = real_get_result(db, record, kind, config)
-        if kind == "de" and (case, "de") in dashboard.pending:
+        if kind == "de" and (case, "de") in jobs.pending:
             store_draft(case)  # the worker commits ...
-            dashboard.pending.discard((case, "de"))  # ... and then clears its flag
+            jobs.pending.discard((case, "de"))  # ... and then clears its flag
         return row
 
-    monkeypatch.setattr(dashboard, "get_result", job_finishes_right_after_the_read)
+    monkeypatch.setattr(jobs, "get_result", job_finishes_right_after_the_read)
     de = client.get("/api/dashboard", query_string={"case": case}).json["selected"]["de"]
     assert de["active"] or de["version"]  # either keep polling or already show the draft
     assert de["active"]  # the flag was read first, so the browser polls once more
@@ -64,7 +65,7 @@ def test_briefing_finishing_during_the_dashboard_read_keeps_the_browser_polling(
     record = dashboard.load_record(case)
     with closing(dashboard.connect()) as db:
         key = dashboard.briefing_context(db, record, "de", CONFIG)[0][0]
-    dashboard.pending.add(("briefing", key))
+    jobs.pending.add(("briefing", key))
     finished = []
 
     class FinishingDb:
@@ -73,11 +74,11 @@ def test_briefing_finishing_during_the_dashboard_read_keeps_the_browser_polling(
 
         def execute(self, sql, params=()):
             rows = self.db.execute(sql, params)
-            if "FROM briefings" in sql and ("briefing", key) in dashboard.pending:
+            if "FROM briefings" in sql and ("briefing", key) in jobs.pending:
                 with closing(dashboard.connect()) as other, other:
                     other.execute("INSERT INTO briefings (cache_key, script, evidence, mp3) VALUES (?,?,?,?)",
                                   (key, "Skript", "[]", b"ID3"))
-                dashboard.pending.discard(("briefing", key))
+                jobs.pending.discard(("briefing", key))
                 finished.append(1)
             return rows
 
@@ -89,8 +90,8 @@ def test_briefing_finishing_during_the_dashboard_read_keeps_the_browser_polling(
 # --- 4. a crashed summary job leaves a visible error, not silence --------------------------------
 
 def test_crashed_summary_job_shows_an_error_on_the_dashboard(client, case, monkeypatch):
-    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert dashboard.run_summary_job(case, "de") is False
+    monkeypatch.setattr(jobs, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert jobs.run_summary_job(case, "de") is False
     de = client.get("/api/dashboard", query_string={"case": case}).json["selected"]["de"]
     assert de == {"version": None, "data": {}, "error": "The summary job failed unexpectedly. Try again.",
                   "approved": None, "active": False}
@@ -98,24 +99,24 @@ def test_crashed_summary_job_shows_an_error_on_the_dashboard(client, case, monke
 
 def test_crashed_job_never_overwrites_a_finished_draft(client, case, monkeypatch):
     store_draft(case)
-    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
-    dashboard.run_summary_job(case, "de")
+    monkeypatch.setattr(jobs, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    jobs.run_summary_job(case, "de")
     de = client.get("/api/dashboard", query_string={"case": case}).json["selected"]["de"]
     assert de["version"] and de["error"] is None
 
 
 def test_retry_after_a_crash_replaces_the_error(client, case, monkeypatch):
-    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
-    dashboard.run_summary_job(case, "facts")
+    monkeypatch.setattr(jobs, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    jobs.run_summary_job(case, "facts")
     monkeypatch.undo()
-    monkeypatch.setattr(dashboard, "current_config", lambda: CONFIG)
-    monkeypatch.setattr(dashboard, "make_facts", lambda c, t: {"facts": "f"})
-    assert dashboard.process(case, "facts", config=CONFIG) is True
+    monkeypatch.setattr(jobs, "current_config", lambda: CONFIG)
+    monkeypatch.setattr(jobs, "make_facts", lambda c, t: {"facts": "f"})
+    assert jobs.process(case, "facts", config=CONFIG) is True
 
 
 def test_crash_for_an_unknown_case_is_only_logged(client, case, monkeypatch, caplog):
-    monkeypatch.setattr(dashboard, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert dashboard.run_summary_job("8C_404/2026@2026-10-01", "de") is False
+    monkeypatch.setattr(jobs, "process", lambda key, kind: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert jobs.run_summary_job("8C_404/2026@2026-10-01", "de") is False
     assert "summary_job_crashed" in caplog.text and "summary_error_not_stored" not in caplog.text
 
 
@@ -129,8 +130,8 @@ def test_summarize_top_breaks_capped_score_ties_by_points_like_the_dashboard(cli
     repo.save_scores([repo.get_score(k) | {"points": p} for k, p in zip(keys, (400, 600, 368))])
     repo.close()
     drafted = []
-    monkeypatch.setattr(dashboard, "run_summary_job", lambda key, lang: drafted.append(key) or True)
-    assert dashboard.summarize_top(1, 1) == 0
+    monkeypatch.setattr(jobs, "run_summary_job", lambda key, lang: drafted.append(key) or True)
+    assert jobs.summarize_top(1, 1) == 0
     assert set(drafted) == {keys[1]}  # 600 points ranks first, as on the dashboard
     shown = [r["key"] for r in client.get("/api/dashboard").json["rows"]]
     assert shown[0] == keys[1]

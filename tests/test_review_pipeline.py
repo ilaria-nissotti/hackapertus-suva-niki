@@ -8,6 +8,7 @@ import json
 import httpx
 
 import app
+import jobs
 import summaries
 from suva.fetch import fetch
 from suva.http import PoliteClient
@@ -70,8 +71,9 @@ def test_one_judgment_from_scraper_to_approved_drafts(tmp_path, monkeypatch):
             task()
 
     config = {"LLM_NAME": "fixture-model", "LLM_BASE_URL": "https://fixture.example/v1"}
-    monkeypatch.setattr(app, "pool", InlineExecutor())
+    monkeypatch.setattr(jobs, "pool", InlineExecutor())
     monkeypatch.setattr(app, "model_config", lambda: config)
+    monkeypatch.setattr(jobs, "model_config", lambda: config)
     seen = []
     drafts = {
         "de": "Das Gericht weist die Beschwerde ab und bestätigt den Entscheid.",
