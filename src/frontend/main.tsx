@@ -4,6 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {CasePane, Status, views} from './CasePane';
 import {Library} from './Library';
 import {CaseSearch} from './CaseSearch';
+import {Weights} from './Weights';
 import type {PrecedentSearch} from './CaseSearch';
 import type {View} from './CasePane';
 import {displayDate, judgmentSubject} from './api';
@@ -31,7 +32,7 @@ function App() {
   const actionLock = useRef(false);
   const params = new URLSearchParams(url);
   const caseKey = params.get('case');
-  const screen = ['library', 'precedents'].find(value => value === params.get('screen')) ?? 'queue';
+  const screen = ['library', 'precedents', 'weights'].find(value => value === params.get('screen')) ?? 'queue';
   const lang: Language = params.get('lang') === 'fr' ? 'fr' : 'de';
   const view = views.find(value => value === params.get('view')) ??
     (location.hash === '#case-briefing' ? 'Legal summaries' : 'Overview');
@@ -195,12 +196,14 @@ function App() {
           <a href={lastQueue.current} onClick={follow} aria-current={screen === 'queue' ? 'page' : undefined}>Review queue</a>
           <a href="/?screen=precedents" onClick={follow} aria-current={screen === 'precedents' ? 'page' : undefined}>Find precedents</a>
           <a href="/?screen=library" onClick={follow} aria-current={screen === 'library' ? 'page' : undefined}>Library</a>
+          <a href="/?screen=weights" onClick={follow} aria-current={screen === 'weights' ? 'page' : undefined}>Rule weights</a>
         </nav>
         <span className="challenge">Suva</span>
       </div>
     </header>
     {screen === 'library' ? <main><Library params={params} link={link} follow={follow} navigate={navigate}/></main> :
      screen === 'precedents' ? <main><CaseSearch follow={follow} search={precedents} onChange={setPrecedents}/></main> :
+     screen === 'weights' ? <main><Weights follow={follow}/></main> :
     <main>
       <div className="headline">
         <h1>Federal Court judgments</h1>
@@ -235,6 +238,12 @@ function App() {
         label={`${count.format(dashboard.stale)} scores are out of date`}>
         <p>Stale cases are excluded from the shortlist. Run <code>python -m suva parse</code> and <code>python -m suva score</code>, then reload.</p>
       </Collapsible>}
+      {dashboard?.rescoring && <p className="notice" role="status">Rescoring the queue with the new rule weights…</p>}
+      {dashboard && !dashboard.rescoring && dashboard.feedback.new >= dashboard.feedback.threshold &&
+        <p className="notice feedback-ready" role="status">
+          <strong>{count.format(dashboard.feedback.new)} new relevance verdicts</strong> since the last weight update.{' '}
+          <a href="/?screen=weights" onClick={follow}>Review updated rule weights</a>
+        </p>}
       {notice && <p className="notice" role="status">{notice}</p>}
       {error && <div className="notice" role="alert">{error} <button onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
       {!dashboard && !error && <p role="status">Loading judgments…</p>}

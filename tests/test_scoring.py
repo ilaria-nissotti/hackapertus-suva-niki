@@ -316,12 +316,12 @@ def test_stored_bands_follow_the_reading_list():
     """high = in the top N of its period above the floor, check = above the floor only, low = below the floor."""
     from suva.scoring.rules import RuleSet, Selection
     from suva.scoring.score import ScoreResult
-    from suva.scoring.store import _bands
+    from suva.scoring.store import reading_list_bands
 
     ruleset = RuleSet(rules=[], selection=Selection(top_n=2, floor_rule_points=10, per="month"))
     points = {"a": 50, "b": 40, "c": 30, "d": 5, "e": 20}  # e is alone in another month
     scored = [({"key": k, "decision_date": "2026-11-02" if k == "e" else "2026-10-01"}, ScoreResult(k, p))
               for k, p in points.items()]
-    assert _bands(scored, ruleset, whole_period=True) == {"a": "high", "b": "high", "c": "check", "d": "low", "e": "high"}
+    assert reading_list_bands(scored, ruleset, whole_period=True) == {"a": "high", "b": "high", "c": "check", "d": "low", "e": "high"}
     # A single hand-added case can't be ranked against its month: only the floor decides.
-    assert _bands(scored, ruleset, whole_period=False) == {"a": "high", "b": "high", "c": "high", "d": "low", "e": "high"}
+    assert reading_list_bands(scored, ruleset, whole_period=False) == {"a": "high", "b": "high", "c": "high", "d": "low", "e": "high"}

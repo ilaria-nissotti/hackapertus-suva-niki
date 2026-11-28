@@ -113,6 +113,20 @@ Needs `fetch --window dev` and `parse` to have run first.
 
 Don't tune on the test set, or its numbers stop meaning anything.
 
+### From the review app (reviewer verdicts)
+
+Reviewers answer "Relevant for Suva?" on each case. `feedback.py` turns those verdicts into labels
+(a verdict wins over the spreadsheet; verdicts on test-split dockets are left out), refits the weights
+like `fit-weights`, and compares old and new for the app's **Rule weights** screen:
+
+- agreement with the verdicts (at or above the floor = shortlisted), the new weights measured with
+  grouped cross-validation over the verdicts so neither side has seen them;
+- share of Suva's picks in the reading list (training months);
+- judgements of the current window that would join or leave the shortlist.
+
+Accepting writes the weights, base and floor into `rules.yaml` in place (comments kept; the judge
+floor follows when it equalled the selection floor) and rescores the window.
+
 ## Files
 
 | File | Purpose |

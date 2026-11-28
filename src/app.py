@@ -2,7 +2,9 @@
 
 Judgements, their parse and the rules score come from the suva knowledge base
 (`python -m suva fetch`, `parse`, `score`). This app stores only review state:
-summary drafts, approvals, audio briefings and cases a reviewer added by hand.
+summary drafts, approvals, audio briefings, cases a reviewer added by hand,
+relevance verdicts and rule-weight proposals. Accepting a proposal is the one
+action that changes rules/rules.yaml; the window is then rescored.
 """
 
 import argparse
@@ -36,9 +38,12 @@ app.config.update(MAX_CONTENT_LENGTH=4 * 1024 * 1024,
                   TRUSTED_HOSTS=["localhost", "127.0.0.1"],
                   DATABASE=_settings.data_dir / "review.sqlite",
                   KB=_settings.sqlite_path,
+                  DATASET=_settings.data_dir / "scoring" / "dataset.jsonl",  # labelled dev window (`suva dataset`)
                   TODAY=None)  # reference date of the challenge window (None = today)
-jobs.settings = app.config  # the jobs read DATABASE, KB and TODAY from here
+jobs.settings = app.config  # the jobs read DATABASE, KB, DATASET and TODAY from here
 queue_read_lock = threading.Lock()
+weights_lock = threading.Lock()  # one accept at a time: it rewrites rules.yaml
+FEEDBACK_THRESHOLD = 30  # new verdicts after which the queue suggests updating the rule weights
 
 
 @app.before_request
@@ -153,6 +158,8 @@ def dashboard_data():
             selected = present(db, selected, config)
             selected["triage_feedback"] = review_store.triage_feedback(db, selected["key"])
         audio = briefing_status(db, selected, lang, config) if selected else {}
+        feedback = verdict_summary(db)
+    rescoring = jobs.is_pending(jobs.RESCORE_TASK)
     published_from = current.published_from.isoformat()
     dates = sorted(r["publication_date"] for r in records
                    if r["publication_date"] and published_from <= r["publication_date"] <= current.end.isoformat())
@@ -175,8 +182,8 @@ def dashboard_data():
         window=(published_from, current.end.isoformat()),
         dates=(dates[0], dates[-1]) if dates else None, model=config["LLM_NAME"],
         query=query, status=status, sort=sort, page=page,
-        message=request.args.get("message"), lang=lang, audio=audio,
-        active=bool(audio.get("active") or selected and any(
+        message=request.args.get("message"), lang=lang, audio=audio, feedback=feedback, rescoring=rescoring,
+        active=bool(rescoring or audio.get("active") or selected and any(
             selected[k]["active"] for k in ("de", "fr"))),
     )
     response.headers["Cache-Control"] = "no-store"
@@ -313,6 +320,102 @@ def save_triage_feedback():
         saved = review_store.triage_feedback(db, key)
     app.logger.info("triage_feedback case=%s status=%s rule_status=%s", key, status, record["status"])
     return jsonify(case=key, triage_feedback=saved, message="Assessment saved.")
+
+
+# The feedback loop: verdicts -> proposed rule weights -> the expert accepts -> rules.yaml -> rescore.
+
+def verdict_summary(db):
+    """Verdict counts, and how many were saved after the last accepted weight update started calculating."""
+    last = next(iter(review_store.accepted_proposals(db, limit=1)), None)
+    total, per_status, new = review_store.verdict_counts(db, TRIAGE_STATUSES, last["created_at"] if last else None)
+    return {"total": total, "relevant": per_status.get("Relevant", 0), "not_relevant": per_status.get("Not relevant", 0),
+            "new": new, "threshold": FEEDBACK_THRESHOLD, "last_update": last["decided_at"] if last else None}
+
+
+def proposal_view(row, current_hash=None):
+    if row is None:
+        return None
+    payload = json.loads(row["payload"]) if row["payload"] else None
+    return {"id": row["id"], "status": row["status"], "created_at": row["created_at"],
+            "decided_at": row["decided_at"], "error": row["error"], "data": payload,
+            # rules.yaml was edited after the calculation: accepting would overwrite those edits
+            "rules_changed": bool(payload and current_hash and payload["rules_hash"] != current_hash)}
+
+
+@app.get("/api/weights")
+def weights_status():
+    with closing(connect()) as db:
+        summary = verdict_summary(db)
+        proposal = proposal_view(review_store.open_proposal(db), review_kb.current_rules_hash())
+        history = [proposal_view(row) for row in review_store.accepted_proposals(db)]
+    response = jsonify(
+        verdicts=summary, proposal=proposal, computing=jobs.is_pending(jobs.WEIGHTS_TASK),
+        rescoring=jobs.is_pending(jobs.RESCORE_TASK), rescore=jobs.rescore_state,
+        history=[{"id": h["id"], "decided_at": h["decided_at"], "verdicts": h["data"]["verdicts"]["used"],
+                  "agreement": h["data"]["agreement"], "floor": h["data"]["floor"]} for h in history if h["data"]])
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/weights/propose")
+def propose_weights():
+    with closing(connect()) as db:
+        if not verdict_summary(db)["total"]:
+            return jsonify(message="Save at least one relevance verdict before calculating new weights."), 400
+    with weights_lock:  # starting supersedes the open proposal, so not while one is being accepted
+        proposal_id = jobs.enqueue_weights_proposal()
+    if proposal_id is None:
+        return jsonify(message="New weights are already being calculated."), 409
+    app.logger.info("weights_proposal_started id=%d", proposal_id)
+    return jsonify(id=proposal_id, message="Calculating new weights…"), 202
+
+
+def proposal_id_from_body():
+    value = (request.get_json(silent=True) or {}).get("id")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+@app.post("/api/weights/accept")
+def accept_weights():
+    from suva.scoring.feedback import write_weights
+    from suva.scoring.rules import RulesError, load_rules
+
+    proposal_id = proposal_id_from_body()
+    with weights_lock, closing(connect()) as db:
+        row = review_store.get_proposal(db, proposal_id) if proposal_id is not None else None
+        if row is None:
+            return jsonify(message="Proposal not found."), 404
+        if row["status"] != "pending":
+            return jsonify(message="This proposal is no longer open. Reload the page."), 409
+        proposal = json.loads(row["payload"])
+        try:
+            rules = load_rules()
+        except (OSError, RulesError) as exc:
+            return jsonify(message=f"rules/rules.yaml cannot be read: {exc}"), 409
+        if review_kb.current_rules_hash() != proposal["rules_hash"]:
+            return jsonify(message="rules/rules.yaml changed after these weights were calculated. "
+                                   "Calculate again so the proposal starts from the current rules."), 409
+        try:
+            write_weights(rules.path, rules, proposal["proposed_weights"], proposal["base"]["proposed"],
+                          proposal["floor"]["proposed"], proposal["verdicts"]["used"])
+        except (OSError, ValueError) as exc:
+            app.logger.warning("weights_write_failed id=%d error=%s", proposal_id, type(exc).__name__)
+            return jsonify(message=f"Could not update rules/rules.yaml: {exc}"), 409
+        review_store.decide_proposal(db, proposal_id, "accepted")
+    jobs.enqueue_rescore()
+    app.logger.info("weights_accepted id=%d verdicts=%d floor=%s->%s", proposal_id, proposal["verdicts"]["used"],
+                    proposal["floor"]["current"], proposal["floor"]["proposed"])
+    return jsonify(message="New weights saved to rules/rules.yaml. Rescoring the queue…")
+
+
+@app.post("/api/weights/discard")
+def discard_weights():
+    proposal_id = proposal_id_from_body()
+    with weights_lock, closing(connect()) as db:
+        if proposal_id is None or not review_store.decide_proposal(db, proposal_id, "discarded"):
+            return jsonify(message="This proposal is no longer open. Reload the page."), 409
+    app.logger.info("weights_discarded id=%d", proposal_id)
+    return jsonify(message="Proposal discarded. The current weights stay as they are.")
 
 
 @app.get("/api/export")
@@ -568,6 +671,8 @@ def main():
     if args.command == "serve":
         if not check_startup(args.strict):
             return 2
+        with closing(connect()) as db:
+            review_store.interrupt_computing(db)  # a calculation cannot survive a restart
         threading.Thread(target=warm_precedent_index, name="precedent-index", daemon=True).start()
         app.run(host="127.0.0.1", port=args.port)
     elif args.command == "summarize-top":

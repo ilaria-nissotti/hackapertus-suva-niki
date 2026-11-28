@@ -306,3 +306,53 @@ mark { background: #f7efd9; color: inherit; padding-inline: .1em }
 .assessment button { justify-self: start }
 .export { margin-top: .75rem; font-size: .9375rem }
 .assessment input[type='radio'] { width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: var(--action) }
+
+/* Rule weights: the feedback loop from the reviewers' verdicts to the scoring rules. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
+.feedback-ready { border-left-color: var(--review) }
+.weights { display: grid; gap: 1.25rem; max-width: 72rem }
+.weights .lead { max-width: 70ch; color: var(--muted) }
+.weights-verdicts { display: grid; gap: .6rem; padding: 1.1rem 1.25rem; background: var(--sheet);
+  border: 1px solid var(--rule); border-radius: 6px }
+.weights-verdicts .actions { margin-top: .25rem }
+.progress { font-weight: 400; max-width: 34rem }
+.progress meter { width: 100%; height: .6rem }
+.proposal .case-body > * + * { margin-top: .9rem }
+.proposal h3 { margin-top: 1.6rem }
+.proposal .notice ul { margin: .35rem 0 0; padding-inline-start: 1.1rem }
+.comparisons { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem }
+.comparison { padding: .9rem 1rem; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper) }
+.comparison-label { font-weight: 650; font-size: .9rem }
+.comparison-figures { font-size: 1.35rem; margin-block: .2rem .3rem; font-variant-numeric: tabular-nums }
+.comparison-figures .before, .floor .before { color: var(--muted) }
+.trend { font-size: .8125rem; font-weight: 700; margin-left: .5rem; vertical-align: middle }
+.trend::before { margin-right: .2rem }
+.trend.up { color: var(--relevant) }
+.trend.up::before { content: '▲' }
+.trend.down { color: var(--alert) }
+.trend.down::before { content: '▼' }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .875rem }
+.swatch { display: inline-block; width: .9rem; height: .55rem; border-radius: 2px; margin-left: .4rem }
+.swatch.current, .bar.current { background: #8a8a7d }
+.swatch.proposed, .bar.proposed { background: var(--action) }
+.weight-table td, .verdict-table td { vertical-align: middle }
+.weight-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums }
+.weight-table tr.unchanged td { color: var(--muted) }
+.chart-col { width: 32%; min-width: 9rem }
+.bars { position: relative; display: block; height: 1.25rem }
+.bars .zero { position: absolute; left: 50%; top: -.1rem; bottom: -.1rem; width: 1px; background: var(--rule-strong) }
+.bar { position: absolute; height: .45rem }
+.bar.current { top: .1rem }
+.bar.proposed { top: calc(.1rem + .45rem + 2px) }
+.bar.positive { border-radius: 0 4px 4px 0 }
+.bar.negative { border-radius: 4px 0 0 4px }
+/* Words, not colours: whether a change is good depends on the rule, so the text says what happens. */
+.change { font-size: .875rem; font-weight: 650; white-space: nowrap }
+.change.no-change { color: var(--muted); font-weight: 400 }
+.verdict-table .agrees::before { content: '✓ '; color: var(--relevant); font-weight: 700 }
+.verdict-table .disagrees::before { content: '✗ '; color: var(--alert); font-weight: 700 }
+.case-list { padding-inline-start: 1.1rem; margin: .35rem 0 0 }
+.case-list li + li { margin-top: .3rem }
+.case-list a { font-weight: 700 }
+.decision { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--rule) }
+.weights-history ul { padding-inline-start: 1.1rem; margin: .5rem 0 0; color: var(--muted) }

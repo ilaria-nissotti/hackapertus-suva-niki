@@ -185,6 +185,97 @@ def enqueue_briefing(key, lang, cache_key, inputs):
             pool.submit(run)
 
 
+# Rule weights from the reviewers' verdicts (the feedback loop). One calculation and one rescore at a time.
+
+WEIGHTS_TASK, RESCORE_TASK = ("weights",), ("rescore",)
+rescore_state = {"error": None, "scored": None}  # outcome of the last rescore, shown on the weights screen
+
+
+def verdicts(db):
+    """key -> relevant, from the reviewers' saved verdicts."""
+    from suva.scoring.feedback import VERDICT_LABELS
+
+    return {row["case_key"]: VERDICT_LABELS[row["status"]] for row in review_store.triage_feedback(db)
+            if row["status"] in VERDICT_LABELS}
+
+
+def enqueue_weights_proposal():
+    """Start a calculation of new weights in the background. Returns the proposal id, or None if one runs."""
+    from suva.scoring.feedback import build_proposal
+    from suva.scoring.rules import load_rules
+
+    with pending_lock:
+        if WEIGHTS_TASK in pending:
+            return None
+        pending.add(WEIGHTS_TASK)
+    try:
+        with closing(connect()) as db:
+            proposal_id = review_store.start_proposal(db)
+            labels = verdicts(db)
+    except BaseException:
+        with pending_lock:
+            pending.discard(WEIGHTS_TASK)
+        raise
+
+    def run():
+        payload = error = None
+        try:
+            with closing(kb()) as repo:
+                payload = build_proposal(repo, load_rules(), Path(settings["DATASET"]), labels, window())
+            log.info("weights_proposed id=%d verdicts=%d agreement=%d->%d", proposal_id, payload["verdicts"]["used"],
+                     payload["agreement"]["current"], payload["agreement"]["proposed"])
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            error = f"Could not calculate new weights: {exc}"
+            log.warning("weights_proposal_failed id=%d error=%s", proposal_id, type(exc).__name__)
+        except Exception as exc:  # a pool thread would swallow it: show it on the weights screen
+            error = "The calculation failed unexpectedly. Try again."
+            log.error("weights_proposal_crashed id=%d error=%s", proposal_id, type(exc).__name__)
+        finally:
+            try:
+                with closing(connect()) as db:
+                    review_store.finish_proposal(db, proposal_id, json.dumps(payload) if payload else None, error)
+            finally:
+                with pending_lock:
+                    pending.discard(WEIGHTS_TASK)
+
+    pool.submit(run)
+    return proposal_id
+
+
+def enqueue_rescore():
+    """Score the window (and cases added by hand) again with the rules as they are now, in the background."""
+    from suva.scoring.rules import load_rules
+    from suva.scoring.store import score_keys, score_window
+
+    with pending_lock:
+        if RESCORE_TASK in pending:
+            return
+        pending.add(RESCORE_TASK)
+
+    def run():
+        try:
+            rules = load_rules()
+            with closing(connect()) as db:
+                added = review_store.added_cases(db)
+            current = window()
+            with closing(kb()) as repo:
+                report = score_window(repo, current, rules)
+                in_window = {row["key"] for row in repo.list_judgements(window=current)}
+                outside = [key for key in added if key not in in_window]  # ranked against the floor only
+                if outside:
+                    score_keys(repo, outside, rules)
+            rescore_state.update(error=None, scored=report.scored + len(outside))
+            log.info("rescored judgements=%d added_outside_window=%d", report.scored, len(outside))
+        except Exception as exc:  # keep the error visible: the queue shows stale scores until a rescore works
+            rescore_state.update(error="Rescoring failed. Run `python -m suva score`.", scored=None)
+            log.error("rescore_failed error=%s", type(exc).__name__)
+        finally:
+            with pending_lock:
+                pending.discard(RESCORE_TASK)
+
+    pool.submit(run)
+
+
 def summarize_top(limit, workers):
     """Draft DE and FR summaries for the best-scored judgements of the window."""
     with closing(kb()) as repo:

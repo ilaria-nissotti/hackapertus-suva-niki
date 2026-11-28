@@ -17,11 +17,49 @@ export type Judgment = Omit<QueueRow, 'issue'> & {
 };
 export type Briefing = {key?: string; active?: boolean; configured?: boolean; ready?: boolean;
   error?: string; script?: string; excerpts?: string[]};
+export type VerdictSummary = {
+  total: number; relevant: number; not_relevant: number; new: number; threshold: number; last_update: string | null;
+};
 export type Dashboard = {
   rows: QueueRow[]; selected: Judgment | null; count: number; total: number;
   scored: number; shortlist: number; stale: number; unknown_publication: number;
   window: [string, string]; dates: [string, string] | null; model: string;
   page: number; lang: Language; audio: Briefing; active: boolean;
+  feedback: VerdictSummary; rescoring: boolean;
+};
+
+/** One rule in a weights proposal: points now and proposed (per match for graded rules). */
+export type WeightRow = {
+  id: string; explanation: string; description: string; group: string; graded: boolean; cap_count: number | null;
+  current: number; proposed: number; current_max: number; proposed_max: number; change: string;
+};
+export type ProposalCase = {
+  key: string; docket: string; title: string; decision_date: string | null;
+  current_points: number; proposed_points: number; verdict?: boolean; current_shown?: boolean; proposed_shown?: boolean;
+};
+export type ProposalData = {
+  training: {judgements: number; relevant: number; spreadsheet_picks: number};
+  verdicts: {used: number; used_relevant: number; overrides: number; added: number; test_split: number; missing: number};
+  weights: WeightRow[];
+  base: {current: number; proposed: number};
+  floor: {current: number | null; proposed: number};
+  agreement: {verdicts: number; current: number; proposed: number};
+  verdict_cases: ProposalCase[];
+  picks_recall: {current: number; proposed: number};
+  shortlist: {judgements: number; before: number; after: number; joined: number; left: number;
+    joined_cases: ProposalCase[]; left_cases: ProposalCase[]};
+  window: [string | null, string];
+  warnings: string[];
+};
+export type Proposal = {
+  id: number; status: 'computing' | 'pending' | 'failed'; created_at: string; decided_at: string | null;
+  error: string | null; data: ProposalData | null; rules_changed: boolean;
+};
+export type WeightsStatus = {
+  verdicts: VerdictSummary; proposal: Proposal | null; computing: boolean; rescoring: boolean;
+  rescore: {error: string | null; scored: number | null};
+  history: {id: number; decided_at: string; verdicts: number; agreement: ProposalData['agreement'];
+    floor: ProposalData['floor']}[];
 };
 export type Action = (endpoint: string, body: FormData, onError?: (message: string) => void) => Promise<boolean>;
 

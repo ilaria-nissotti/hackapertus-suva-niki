@@ -1,4 +1,5 @@
-"""The review app's own database (`DATA_DIR/review.sqlite`): drafts, approvals, briefings and added cases.
+"""The review app's own database (`DATA_DIR/review.sqlite`): drafts, approvals, briefings, added cases,
+relevance verdicts and rule-weight proposals.
 
 Every query on these tables lives here. Judgements, parses and scores stay in the knowledge base (`review_kb.py`).
 """
@@ -21,6 +22,10 @@ SCHEMA = """
     CREATE TABLE IF NOT EXISTS triage_feedback (
         case_key TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
         rule_points REAL, saved_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS weight_proposals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        status TEXT NOT NULL, payload TEXT, error TEXT, decided_at TEXT
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS library USING fts5(
         case_key UNINDEXED, lang UNINDEXED, approved_at UNINDEXED, summary,
@@ -102,6 +107,65 @@ def triage_feedback(db, key=None):
         row = db.execute("SELECT * FROM triage_feedback WHERE case_key=?", (key,)).fetchone()
         return dict(row) if row else None
     return [dict(row) for row in db.execute("SELECT * FROM triage_feedback ORDER BY saved_at, case_key")]
+
+
+def verdict_counts(db, statuses, since=None):
+    """Verdicts with one of `statuses`: (total, per status, saved after `since`)."""
+    marks = ", ".join("?" * len(statuses))
+    per_status = dict(db.execute(f"SELECT status, COUNT(*) FROM triage_feedback WHERE status IN ({marks})"
+                                 " GROUP BY status", statuses).fetchall())
+    new = db.execute(f"SELECT COUNT(*) FROM triage_feedback WHERE status IN ({marks}) AND saved_at > ?",
+                     (*statuses, since or "")).fetchone()[0]
+    return sum(per_status.values()), per_status, new
+
+
+# Rule-weight proposals from the verdicts: computing -> pending (ready for review) -> accepted or discarded.
+# A failed calculation is stored as failed with its error. Accepted rows are the history of weight updates.
+
+def start_proposal(db):
+    """A new calculation; older proposals still waiting for review are superseded by it."""
+    with db:
+        db.execute("UPDATE weight_proposals SET status='superseded', decided_at=datetime('now')"
+                   " WHERE status IN ('computing', 'pending', 'failed')")
+        return db.execute("INSERT INTO weight_proposals (status) VALUES ('computing')").lastrowid
+
+
+def finish_proposal(db, proposal_id, payload=None, error=None):
+    with db:
+        db.execute("UPDATE weight_proposals SET status=?, payload=?, error=? WHERE id=? AND status='computing'",
+                   ("failed" if error else "pending", payload, error, proposal_id))
+
+
+def decide_proposal(db, proposal_id, status):
+    """Mark a pending proposal accepted or discarded (atomic: only one decision wins). True if decided."""
+    with db:
+        return db.execute("UPDATE weight_proposals SET status=?, decided_at=datetime('now')"
+                          " WHERE id=? AND status='pending'", (status, proposal_id)).rowcount == 1
+
+
+def get_proposal(db, proposal_id):
+    row = db.execute("SELECT * FROM weight_proposals WHERE id=?", (proposal_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def open_proposal(db):
+    """The latest proposal that is computing, waiting for review or failed (None if there is none)."""
+    row = db.execute("SELECT * FROM weight_proposals WHERE status IN ('computing', 'pending', 'failed')"
+                     " ORDER BY id DESC LIMIT 1").fetchone()
+    return dict(row) if row else None
+
+
+def accepted_proposals(db, limit=20):
+    """Accepted weight updates, newest first."""
+    return [dict(row) for row in db.execute("SELECT * FROM weight_proposals WHERE status='accepted'"
+                                            " ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+def interrupt_computing(db):
+    """At startup: a calculation still marked computing died with the previous server process."""
+    with db:
+        db.execute("UPDATE weight_proposals SET status='failed', error=? WHERE status='computing'",
+                   ("The calculation was interrupted. Calculate again.",))
 
 
 # Library: full-text search over approved summaries.

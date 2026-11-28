@@ -83,7 +83,8 @@ def score_keys(repo: Repository, keys: list[str], ruleset: RuleSet) -> ScoreRunR
     return _score_rows(repo, rows, ruleset, None)
 
 
-def _bands(scored: list[tuple[dict[str, Any], ScoreResult]], ruleset: RuleSet, whole_period: bool) -> dict[str, str]:
+def reading_list_bands(scored: list[tuple[dict[str, Any], ScoreResult]], ruleset: RuleSet,
+                       whole_period: bool) -> dict[str, str]:
     """high / check / low per key, from the reading list (see the module docstring)."""
     floor = ruleset.selection.floor_rule_points
     top_n = ruleset.selection.top_n if whole_period else None
@@ -100,7 +101,7 @@ def _score_rows(repo: Repository, judgements: list[dict[str, Any]], ruleset: Rul
     # The significance rules look at appellant, outcome and reasoning_pages, derived like in the dataset.
     records = [with_derived_fields(features_record(repo, row)) for row in judgements]
     scored = [(record, score_record(record, ruleset)) for record in records]
-    band_of = _bands(scored, ruleset, whole_period=window is not None)
+    band_of = reading_list_bands(scored, ruleset, whole_period=window is not None)
     bands, rows = Counter(), []
     for row, (record, result) in zip(judgements, scored):
         band = band_of[row["key"]]

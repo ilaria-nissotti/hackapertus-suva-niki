@@ -121,8 +121,9 @@ gets its share of a month's 30 places; floor fitted per fold: 65, 76, 73, 81, 79
   e.g. "The insurer appealed …". Lawyers can check and correct the reasons.
 - **Experts edit `rules.yaml` without touching code**, and `fit-weights` suggests the
   points from data.
-- **Planned feedback loop:** each expert verdict becomes a new label, and `fit-weights`
-  re-weighs the rules with it.
+- **Feedback loop:** each expert verdict becomes a new label. On the Rule weights screen the
+  weights are refitted with them, compared with the current ones (agreement with held-out verdicts,
+  recall of Suva's picks, shortlist changes), and applied only when an expert accepts.
 
 ## 6. Caveats to state openly
 

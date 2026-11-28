@@ -125,7 +125,8 @@ function Assessment({record}: {record: Judgment}) {
     }
   }}>
     <h4>Your assessment</h4>
-    <p className="muted">Agree or disagree with the rules. Saved for the rules experts; the score stays as it is.</p>
+    <p className="muted">Agree or disagree with the rules. Verdicts can retrain the rule weights (Rule weights);
+      this score stays as it is until new weights are accepted.</p>
     <fieldset>
       <legend>Relevant for Suva?</legend>
       <div className="options">{ASSESSMENTS.map(value => <label key={value}>

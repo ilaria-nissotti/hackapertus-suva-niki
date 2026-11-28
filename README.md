@@ -115,6 +115,19 @@ judgments of the window, sorted by score, each with the rules that fired
 run `suva score` again to change the ranking; the app flags scores that are out
 of date. `--today YYYY-MM-DD` (on `fetch`, `score` and `app.py`) pins the window.
 
+### Feedback loop: retraining the rule weights
+
+Open a case and answer **Your assessment** (Relevant / Not relevant). After 30
+new verdicts the queue suggests an update; **Rule weights** can calculate one at
+any time. It refits the weights on Suva's spreadsheet picks plus your verdicts
+(about a minute, in the background) and shows, before anything changes: how many
+verdicts the current and new weights agree with (the new weights are tested on
+verdicts they were not trained on), the share of Suva's past picks in the reading
+list, which judgements would join or leave the shortlist, and every rule's old and
+new points. **Accept** writes the numbers into `rules/rules.yaml` (comments kept)
+and rescores the queue; **Discard** keeps the current weights. It needs
+`data/scoring/dataset.jsonl` (`python -m suva dataset`; built on first use if missing).
+
 ```sh
 .venv/bin/python src/app.py summarize-top --limit 10   # DE/FR drafts for the 10 best-scored
 ```
