@@ -3,7 +3,7 @@ import {useEffect, useId, useRef, useState} from 'react';
 import {Conversation} from './Conversation';
 import {displayDate, fields, judgmentSubject, operativeText} from './api';
 import {Badge, Button, Collapsible, Textarea} from './components/ui/controls';
-import type {Action, Briefing, FiredRule, Judgment, Language} from './api';
+import type {Action, Briefing, FiredRule, Judgment, Language, TriageFeedback} from './api';
 
 export const views = ['Overview', 'Legal summaries', 'Ask this judgment'] as const;
 export type View = typeof views[number];
@@ -84,6 +84,51 @@ function Relevance({record}: {record: Judgment}) {
       <p className="muted">Rules: <code>rules/rules.yaml</code></p>
     </Collapsible>
   </>;
+}
+
+const ASSESSMENTS = ['Relevant', 'Review', 'Low relevance'];
+
+/** The reviewer's own triage, saved beside the rules score (which it never changes). */
+function Assessment({record}: {record: Judgment}) {
+  const [saved, setSaved] = useState<TriageFeedback | null>(record.triage_feedback ?? null);
+  const [status, setStatus] = useState(saved?.status ?? '');
+  const [reason, setReason] = useState(saved?.reason ?? '');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  return <form className="assessment" onSubmit={async event => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/triage-feedback', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({case: record.key, status, reason})});
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || 'Could not save the assessment.');
+      setSaved(body.triage_feedback);
+      setMessage(body.message);
+    } catch (failure) {
+      console.warn('triage_feedback_failed', {reason: String(failure)});
+      setMessage(failure instanceof Error ? failure.message : 'Could not save the assessment.');
+    } finally {
+      setBusy(false);
+    }
+  }}>
+    <h4>Your assessment</h4>
+    <p className="muted">Agree or disagree with the rules. Saved for the rules experts; the score stays as it is.</p>
+    <fieldset>
+      <legend>Relevance for Suva</legend>
+      {ASSESSMENTS.map(value => <label key={value}>
+        <input type="radio" name="assessment" value={value} checked={status === value} required
+          onChange={() => setStatus(value)}/> {value}</label>)}
+    </fieldset>
+    <label>Reason (optional)
+      <textarea rows={3} maxLength={2000} value={reason} onChange={event => setReason(event.target.value)}/>
+    </label>
+    <button disabled={busy || !status}>{saved ? 'Update assessment' : 'Save assessment'}</button>
+    {message && <p role="status">{message}</p>}
+    {saved && !message && <p className="muted">Saved: {saved.status}{saved.status !== record.status &&
+      ` (rules: ${record.status})`}.</p>}
+  </form>;
 }
 
 function Summary({record, lang, audio, action, busy, visible}: {
@@ -235,6 +280,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
         <section>
           <h3>Why this was flagged</h3>
           <Relevance record={record}/>
+          <Assessment record={record}/>
         </section>
         <section>
           <h3>Original judgment</h3>

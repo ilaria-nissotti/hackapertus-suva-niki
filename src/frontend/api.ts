@@ -6,10 +6,12 @@ export type QueueRow = {
 };
 export type GlossaryWarning = {found: string; expected: string};
 type Draft = {summary: string; quotes: string[]; glossary_warnings: GlossaryWarning[]};
+export type TriageFeedback = {status: string; reason: string; rule_points: number | null; saved_at: string};
 export type FiredRule = {id: string; points: number; explanation: string};
 export type Judgment = Omit<QueueRow, 'issue'> & {
   date_source: string | null; source_url: string | null; decision: string | null; full_text: string; language: string | null;
   band: 'high' | 'check' | 'low' | null; fired: FiredRule[]; score_current: boolean;
+  triage_feedback?: TriageFeedback | null;
   de: Result<Draft>;
   fr: Result<Draft>;
 };

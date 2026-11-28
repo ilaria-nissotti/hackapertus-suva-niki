@@ -87,7 +87,6 @@ def test_case_search_boosts_citations_and_returns_explanations(client, case, tmp
     assert any(hit["key"] == case for hit in hits[1:])
 
 
-@pending
 def test_triage_records_reviewer_reason_without_replacing_rule_score(client, case):
     before = page(client, case=case)["selected"]["score"]
     feedback = {"case": case, "status": "Relevant", "reason": "Die Erwägung präzisiert den Kausalzusammenhang."}

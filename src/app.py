@@ -151,6 +151,7 @@ def dashboard_data():
         config = jobs.current_config()
         if selected:
             selected = present(db, selected, config)
+            selected["triage_feedback"] = review_store.triage_feedback(db, selected["key"])
         audio = briefing_status(db, selected, lang, config) if selected else {}
     published_from = current.published_from.isoformat()
     dates = sorted(r["publication_date"] for r in records
@@ -276,6 +277,26 @@ def case_search_route():
         records = review_kb.window_records(repo, window(), extra, include_text=True)
         hits = case_search.search(records, repo.list_citations, repo.list_passages, description.strip())
     return jsonify(hits=hits, searched=len(records))
+
+
+TRIAGE_STATUSES = ("Relevant", "Review", "Low relevance")
+
+
+@app.post("/api/triage-feedback")
+def save_triage_feedback():
+    body = request.get_json(silent=True) or {}
+    key, status, reason = body.get("case"), body.get("status"), body.get("reason", "")
+    if status not in TRIAGE_STATUSES or not isinstance(reason, str) or len(reason) > 2000:
+        return jsonify(message="Choose Relevant, Review or Low relevance; the reason has at most 2000 characters."), 400
+    record = load_record(key)
+    if record is None:
+        return jsonify(message="Judgment not found."), 404
+    with closing(connect()) as db:
+        # The rule points at the time of the assessment, so a later rules change can be compared against it.
+        review_store.save_triage_feedback(db, key, status, reason.strip(), record["points"])
+        saved = review_store.triage_feedback(db, key)
+    app.logger.info("triage_feedback case=%s status=%s rule_status=%s", key, status, record["status"])
+    return jsonify(case=key, triage_feedback=saved, message="Assessment saved.")
 
 
 def prepare_briefing(key, lang):

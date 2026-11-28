@@ -288,3 +288,12 @@ mark { background: #f7efd9; color: inherit; padding-inline: .1em }
 .library-ask label { display: grid; gap: .3rem; font-weight: 650 }
 .library-ask button { justify-self: start }
 .matches { display: flex; flex-wrap: wrap; gap: .25rem 1rem; list-style: none; margin: .35rem 0 0; padding: 0; font-size: .875rem }
+
+/* Reviewer assessment beside the rules score. */
+.assessment { display: grid; gap: .6rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--rule); max-width: 60ch }
+.assessment fieldset { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; border: 0; margin: 0; padding: 0 }
+.assessment legend { font-weight: 650; padding: 0; margin-bottom: .3rem }
+.assessment label { display: grid; gap: .3rem }
+.assessment fieldset label { display: inline-flex; align-items: center; gap: .4rem }
+.assessment button { justify-self: start }
+.assessment input[type='radio'] { width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: var(--action) }

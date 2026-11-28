@@ -18,6 +18,10 @@ SCHEMA = """
     CREATE TABLE IF NOT EXISTS review_cases (
         case_key TEXT PRIMARY KEY, added_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS triage_feedback (
+        case_key TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+        rule_points REAL, saved_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     CREATE VIRTUAL TABLE IF NOT EXISTS library USING fts5(
         case_key UNINDEXED, lang UNINDEXED, approved_at UNINDEXED, summary,
         tokenize = 'unicode61 remove_diacritics 2'
@@ -82,6 +86,22 @@ def approve(db, key, kind, version, summary, previous_approved):
             db.execute("INSERT INTO library (case_key, lang, approved_at, summary) VALUES (?, ?, datetime('now'), ?)",
                        (key, kind, summary))
     return saved.rowcount == 1
+
+
+# Reviewer triage: agreement or disagreement with the rules score, kept apart from the score itself.
+
+def save_triage_feedback(db, key, status, reason, rule_points):
+    with db:
+        db.execute("""INSERT INTO triage_feedback (case_key, status, reason, rule_points) VALUES (?, ?, ?, ?)
+            ON CONFLICT(case_key) DO UPDATE SET status=excluded.status, reason=excluded.reason,
+            rule_points=excluded.rule_points, saved_at=datetime('now')""", (key, status, reason, rule_points))
+
+
+def triage_feedback(db, key=None):
+    if key is not None:
+        row = db.execute("SELECT * FROM triage_feedback WHERE case_key=?", (key,)).fetchone()
+        return dict(row) if row else None
+    return [dict(row) for row in db.execute("SELECT * FROM triage_feedback ORDER BY saved_at, case_key")]
 
 
 # Library: full-text search over approved summaries.
