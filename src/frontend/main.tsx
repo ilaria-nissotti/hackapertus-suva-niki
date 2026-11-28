@@ -5,6 +5,8 @@ import {CasePane, Status, views} from './CasePane';
 import type {View} from './CasePane';
 import {displayDate} from './api';
 import type {Dashboard, Language} from './api';
+import '@fontsource-variable/atkinson-hyperlegible-next';
+import '@fontsource-variable/literata';
 import './style.css';
 
 const statuses = ['Relevant', 'Review', 'Low relevance', 'Stale', 'Unscored'];
