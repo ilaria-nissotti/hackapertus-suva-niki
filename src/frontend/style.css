@@ -26,7 +26,7 @@ button.primary { background: var(--accent); color: white; border-color: var(--ac
 button.primary:hover:not(:disabled) { background: #602031 }
 h1, h2, h3, p, dl { margin: 0 }
 h1, h2 { font-family: var(--serif); font-weight: 500; line-height: 1.14; color: var(--ink) }
-h1 { font-size: clamp(2rem, 4.3vw, 3.65rem); letter-spacing: -.045em }
+h1 { font-size: clamp(1.8rem, 3vw, 2.4rem); letter-spacing: -.03em }
 h2 { font-size: 1.65rem }
 h3 { font-size: 1.1rem }
 .masthead { background: var(--ink); color: white; border-bottom: 3px solid var(--accent) }
@@ -37,14 +37,14 @@ h3 { font-size: 1.1rem }
 .brand span { border: 1px solid #7e8a99; display: grid; place-items: center; border-radius: .35rem; width: 2rem; height: 2rem }
 .challenge { color: #e0e6ef; font-size: .875rem }
 .challenge span { margin-inline: .4rem; color: #b0bdce }
-main { padding-block: clamp(1.5rem, 4vw, 3.5rem) 1.5rem }
-.headline { margin-bottom: 1.45rem; flex-wrap: wrap }
-.coverage { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: .7rem; background: white; margin-bottom: 1.5rem }
+main { padding-block: clamp(1.25rem, 2.5vw, 2rem) 1.5rem }
+.headline { margin-bottom: 1rem; flex-wrap: wrap }
+.coverage { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: .7rem; background: white; margin-bottom: 1rem }
 .metrics { display: flex; align-items: stretch }
-.metrics div { padding: .85rem 1.25rem; min-width: clamp(6rem, 11vw, 9rem); border-right: 1px solid var(--line) }
+.metrics div { padding: .6rem 1.25rem; min-width: clamp(6rem, 11vw, 9rem); border-right: 1px solid var(--line) }
 .metrics dt, .metadata dt { color: var(--muted); font-size: .875rem }
 .metrics dd { margin: .12rem 0 0; font: 1.8rem var(--serif); font-variant-numeric: lining-nums tabular-nums }
-.coverage-dates { display: grid; align-content: center; padding: .85rem 1.25rem; font-size: .95rem }
+.coverage-dates { display: grid; align-content: center; padding: .6rem 1.25rem; font-size: .95rem }
 .coverage-dates small, footer, .muted { color: var(--muted); font-size: .875rem }
 .workspace { display: grid; gap: 1.15rem; align-items: start }
 .case-placeholder { display: none; padding: clamp(1rem, 2vw, 1.55rem); color: var(--muted) }
