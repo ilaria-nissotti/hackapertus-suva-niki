@@ -16,6 +16,31 @@ function Evidence({label, passages}: {label: string; passages?: string[]}) {
   return <details><summary>{label}</summary>{passages.map((text, i) => <blockquote key={i}>{text}</blockquote>)}</details>;
 }
 
+/** The stored ruling, paragraph by paragraph, with the court's paragraph numbers (1., 2.1 …) hung in the margin. */
+function RulingText({text}: {text: string}) {
+  const blocks: {number: string; text: string}[] = [];
+  let number = '';
+  for (const part of text.split(/\n{2,}/)) {
+    if (!part.trim()) continue;
+    // A number on its own ("2.2."), or on the first line of the paragraph it numbers ("2.2.2.\nNach dem …").
+    const numbered = part.match(/^\s*(\d+(?:\.\d+)*\.?)\s*(?:\n([\s\S]*))?$/);
+    if (numbered && !numbered[2]) {
+      if (number) blocks.push({number, text: ''});
+      number = numbered[1];
+    } else if (numbered) {
+      if (number) blocks.push({number, text: ''});
+      blocks.push({number: numbered[1], text: numbered[2]});
+      number = '';
+    } else {
+      blocks.push({number, text: part});
+      number = '';
+    }
+  }
+  if (number) blocks.push({number, text: ''});
+  return <div className="source ruling">{blocks.map((block, i) =>
+    <p key={i}><span className="paragraph-number">{block.number}</span>{block.text}</p>)}</div>;
+}
+
 const BANDS = {high: 'High relevance: read it', check: 'Check: skim it', low: 'Low relevance: likely skip'};
 
 function Relevance({record}: {record: Judgment}) {
@@ -79,7 +104,7 @@ function Summary({record, lang, audio, action, busy, visible}: {
             setSaveStatus('');
           }
         }}>
-          <label>{result.approved ? 'Approved summary' : 'AI draft · Review before use'}
+          <label>{result.approved ? 'Approved summary' : 'AI draft: review it before approving'}
             <textarea lang={lang} rows={12} required maxLength={16000} disabled={busy}
               value={edit ?? saved} onChange={event => {
                 setEdit(event.target.value);
@@ -129,15 +154,16 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
     <header className="case-header">
       <a className="back" href={close} onClick={onClose}>Back to queue</a>
       <div className="case-identity">
-        <div><p className="context">Federal Supreme Court</p><h2 id="case-title">{record.docket}</h2></div>
-        <div className="case-score">{record.score !== null && <strong>{Math.round(record.score)}<small> / 100</small></strong>}
-          <Status value={record.status}/></div>
+        <h2 id="case-title">{record.docket}</h2>
+        <div className="case-score"><Status value={record.status}/>
+          {record.score !== null && <strong>{Math.round(record.score)}<small> / 100</small></strong>}</div>
       </div>
-      {record.title !== record.docket && <p className="case-name">{record.title}</p>}
+      {record.title !== record.docket && <p className="case-name" lang={record.language ?? undefined}>{record.title}</p>}
       <dl className="metadata">
-        <div><dt>Published</dt><dd>{record.publication_date ? displayDate(record.publication_date) +
-          (record.date_source ? ' · ' + record.date_source : '') : 'Unknown'}</dd></div>
+        <div><dt>Court</dt><dd>Federal Supreme Court</dd></div>
         <div><dt>Decided</dt><dd>{displayDate(record.decision_date)}</dd></div>
+        <div><dt>Published</dt><dd>{record.publication_date ? displayDate(record.publication_date) +
+          (record.date_source ? ` (${record.date_source})` : '') : 'Unknown'}</dd></div>
       </dl>
     </header>
     <nav className="case-nav" aria-label="Judgment sections">
@@ -157,7 +183,7 @@ export function CasePane({record, audio, lang, view, selectView, selectLanguage,
         <section>
           <h3>Original judgment</h3>
           {record.source_url && <a href={record.source_url} target="_blank" rel="noopener noreferrer">Open source judgment</a>}
-          <details><summary>Read judgment text</summary><div className="source">{record.full_text}</div></details>
+          <details><summary>Read judgment text</summary><RulingText text={record.full_text}/></details>
         </section>
       </div>
       <div hidden={view !== 'Legal summaries'}>
