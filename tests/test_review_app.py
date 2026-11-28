@@ -134,3 +134,12 @@ def test_missing_source_text_is_reported_without_a_model_call(client, tmp_path, 
     monkeypatch.setattr(jobs, "make_facts", unexpected_call)
     assert not jobs.process(key, "de")
     assert page(client, case=key)["selected"]["de"]["error"] == "The judgment has no usable source text."
+
+
+def test_rank_orders_by_score_then_points_with_unscored_last():
+    import review_kb
+
+    rows = [dict(key="unscored", score=None, points=None), dict(key="capped-low", score=100.0, points=40),
+            dict(key="mid", score=55.0, points=None), dict(key="capped-high", score=100.0, points=90),
+            dict(key="mid-tie", score=55.0, points=0)]
+    assert [r["key"] for r in review_kb.rank(rows)] == ["capped-high", "capped-low", "mid", "mid-tie", "unscored"]

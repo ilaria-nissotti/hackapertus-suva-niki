@@ -70,6 +70,20 @@ def window_records(repo, window: Window, extra_keys=(), rules_digest=None):
     return [record(r, digest) for r in rows]
 
 
+def rank(records):
+    """Best first: score, then rule points (they break capped 100 ties); unscored last. Ties keep their order.
+    The dashboard queue and `summarize-top` both use this, so "top N" means the same in both."""
+    return sorted(records, key=lambda r: (r["score"], r["points"] or 0) if r["score"] is not None else (-1, 0),
+                  reverse=True)
+
+
+def filter_queue(records, query="", status=""):
+    """Records whose docket, title or rule explanations contain `query` (casefolded), with that status if given."""
+    return [r for r in records
+            if query in f"{r['docket']} {r['title']} {' '.join(f['explanation'] for f in r['fired'])}".casefold()
+            and (not status or status == r["status"])]
+
+
 def get_record(repo, key, rules_digest=None):
     rows = repo.list_review_rows(keys=[key], include_text=True)
     if not rows:

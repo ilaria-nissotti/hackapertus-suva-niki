@@ -156,13 +156,11 @@ def dashboard_data():
                    if r["publication_date"] and published_from <= r["publication_date"] <= current.end.isoformat())
     query = request.args.get("q", "").strip().casefold()
     status = request.args.get("status", "")
-    rows = [r for r in records
-            if query in f"{r['docket']} {r['title']} {' '.join(f['explanation'] for f in r['fired'])}".casefold()
-            and (not status or status == r["status"])]
+    rows = review_kb.filter_queue(records, query, status)
     sort = request.args.get("sort", "score")
     rows.sort(key=lambda r: (r["publication_date"] or "", r["decision_date"] or "", r["docket"]), reverse=True)
     if sort != "date":
-        rows.sort(key=lambda r: (r["score"], r["points"]) if r["score"] is not None else (-1, 0), reverse=True)
+        rows = review_kb.rank(rows)
     page = request.args.get("page", 1, type=int)
     page = min(max(page, 1), max(1, (len(rows) + PAGE - 1) // PAGE))
     response = jsonify(
