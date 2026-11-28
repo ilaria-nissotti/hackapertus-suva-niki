@@ -27,12 +27,28 @@ test.describe('a new browser', () => {
     await expect(page).toHaveURL(/\/start$/);
     await expect(page.getByLabel('Name', {exact: true})).toHaveValue('Frei Thomas');
     await expect(page.getByLabel('Initials')).toHaveValue('FRT');
+    await expect(page.getByLabel('Function (optional)')).toHaveValue('Rechtsanwalt');
     expect(await (await page.request.get('/api/session')).json()).toEqual({reviewer: null});
+
+    await page.reload();
+    await expect(page.getByLabel('Name', {exact: true})).toHaveValue('Frei Thomas');
+    await expect(page.getByLabel('Initials')).toHaveValue('FRT');
+    await expect(page.getByLabel('Function (optional)')).toHaveValue('Rechtsanwalt');
+
+    await page.getByLabel('Name', {exact: true}).fill('Villa Rebeca');
+    await page.getByLabel('Initials').fill('VIL');
+    await page.getByLabel('Function (optional)').clear();
+    await page.getByRole('button', {name: 'Start reviewing'}).click();
+    await expect(page.locator('.account')).toContainText('Reviewing as Villa Rebeca (VIL)');
+    await page.reload();
+    await expect(page.locator('.account')).toContainText('Reviewing as Villa Rebeca (VIL)');
   });
 });
 
 test('an approved summary shows who signed it', async ({page}) => {
   const {rows} = await (await page.request.get('/api/dashboard')).json();
   await page.goto('/?' + new URLSearchParams({case: rows[0].key, view: 'Legal summaries'}));
-  await expect(page.locator('.signature')).toContainText('Approved by Muster Anna (MUA), Rechtsanwältin');
+  await expect(page.locator('.signature')).toHaveText(
+    /Approved by Muster Anna \(MUA\), Rechtsanwältin · \d{1,2} [A-Z][a-z]{2} \d{4}, \d{2}:\d{2}/,
+  );
 });

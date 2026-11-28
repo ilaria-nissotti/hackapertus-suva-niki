@@ -7,8 +7,12 @@ import sqlite3
 import stat
 from contextlib import closing
 from http.cookies import SimpleCookie
+from io import BytesIO
+from xml.etree import ElementTree
+from zipfile import ZipFile
 
 import pytest
+from itsdangerous import TimestampSigner
 
 import app as dashboard
 import review_store
@@ -51,6 +55,24 @@ def test_the_name_is_checked_tidied_and_kept_in_an_httponly_cookie(client):
     assert client.get("/api/dashboard").status_code == 200
     assert client.post("/api/session/end").json == {"reviewer": None}
     assert client.get("/api/dashboard").status_code == 401
+
+
+def test_reviewer_cookie_expires_after_twelve_hours(client, monkeypatch):
+    issued_at = 1_800_000_000
+    clock = issued_at
+    monkeypatch.setattr(TimestampSigner, "get_timestamp", lambda self: clock)
+    monkeypatch.setitem(dashboard.app.config, "SESSION_REFRESH_EACH_REQUEST", False)
+
+    response = start(client, name="Frei Thomas", initials="FRT")
+    assert response.status_code == 200
+    reviewer = FREI | {"function": ""}
+    assert response.json == {"reviewer": reviewer}
+
+    clock = issued_at + 12 * 60 * 60 - 1
+    assert client.get("/api/session").json == {"reviewer": reviewer}
+    clock += 2
+    assert client.get("/api/session").json == {"reviewer": None}
+    assert client.post("/approve", headers=JSON).status_code == 401
 
 
 def test_another_site_cannot_set_or_end_the_reviewer(client):
@@ -99,6 +121,54 @@ def test_an_approved_edit_by_another_reviewer_is_signed_by_them_and_kept_in_the_
     assert page(client, case=case)["selected"]["de"]["signer"] == {"name": "Villa Rebeca", "initials": "VIL"}
     with closing(dashboard.connect()) as db:
         assert [row["initials"] for row in db.execute("SELECT initials FROM signatures ORDER BY id")] == ["FRT", "VIL"]
+
+
+@pytest.mark.parametrize("format", ["html", "docx", "pdf"])
+def test_export_ends_with_the_current_author_for_each_language(client, case, format):
+    assert start(client).status_code == 200
+    de_version = add_draft(case, "de")
+    original = "Das Bundesgericht bestätigt die Leistungspflicht."
+    de_approval = {"case": case, "lang": "de", "version": de_version}
+    assert client.post("/approve", headers=JSON, data=de_approval | {
+        "summary": original, "previous_approved": "",
+    }).status_code == 200
+    assert client.post("/approve", headers=JSON, data={
+        "case": case, "lang": "fr", "version": add_draft(case, "fr"),
+        "summary": "Le Tribunal fédéral confirme la prise en charge.", "previous_approved": "",
+    }).status_code == 200
+
+    assert start(client, name="Villa Rebeca", initials="VIL").status_code == 200
+    assert client.post("/approve", headers=JSON, data=de_approval | {
+        "summary": original + " Ergänzt.", "previous_approved": original,
+    }).status_code == 200
+
+    # A stale submission must produce neither a text change nor an extra signature.
+    assert client.post("/approve", headers=JSON, data=de_approval | {
+        "summary": "Veraltete Änderung", "previous_approved": original,
+    }).status_code == 409
+    with closing(dashboard.connect()) as db:
+        assert [tuple(row) for row in db.execute(
+            "SELECT kind, initials FROM signatures WHERE case_key=? ORDER BY id", (case,),
+        )] == [("de", "FRT"), ("fr", "FRT"), ("de", "VIL")]
+
+    response = client.get("/api/export", query_string={"case": case, "format": format})
+    assert response.status_code == 200
+    authors = ["Autor", "Villa Rebeca (VIL)", "Frei Thomas (FRT), Rechtsanwalt"]
+    if format == "html":
+        ending = f"<h2>{authors[0]}</h2><p>{authors[1]}</p><p>{authors[2]}</p><hr></body></html>"
+        assert response.get_data(as_text=True).endswith(ending)
+    elif format == "docx":
+        with ZipFile(BytesIO(response.data)) as archive:
+            document = ElementTree.fromstring(archive.read("word/document.xml"))
+        body = [node.text for node in document.findall(".//{*}t")]
+        assert body[-3:] == authors
+    else:
+        assert response.mimetype == "application/pdf"
+        # The built-in renderer writes uncompressed text operators with escaped parentheses.
+        text = response.data.decode("cp1252")
+        lines = [line.split(" Tf (", 1)[1].rsplit(") Tj", 1)[0] for line in text.splitlines()
+                 if " Tf (" in line and " Tf ()" not in line]
+        assert lines[-3:] == [line.replace("(", r"\(").replace(")", r"\)") for line in authors]
 
 
 def test_session_secret_is_created_once_and_private(tmp_path, monkeypatch):
