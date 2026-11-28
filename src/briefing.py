@@ -10,6 +10,7 @@ import re
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import review_store
 from bger import local_config
 from summaries import ask, passages, resolve_passages
 
@@ -82,7 +83,7 @@ def generate(connect, database, key, record, approved, lang, config, api_key, vo
     lock_dir.mkdir(parents=True, exist_ok=True)
     with (lock_dir / key).open("a") as lock, closing(connect()) as db:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        row = db.execute("SELECT script, mp3 FROM briefings WHERE cache_key=?", (key,)).fetchone()
+        row = review_store.get_briefing(db, key)
         if row and row["mp3"]:
             return True
         script = row["script"] if row else None
@@ -90,15 +91,10 @@ def generate(connect, database, key, record, approved, lang, config, api_key, vo
         try:
             if not script:
                 script, excerpts = write_script(config, record, approved, lang)
-                with db:
-                    db.execute("""INSERT INTO briefings (cache_key, script, evidence)
-                        VALUES (?, ?, ?) ON CONFLICT(cache_key) DO UPDATE
-                        SET script=excluded.script, evidence=excluded.evidence, error=NULL""",
-                               (key, script, json.dumps(excerpts, ensure_ascii=False)))
+                review_store.save_briefing_script(db, key, script, json.dumps(excerpts, ensure_ascii=False))
             stage = "ElevenLabs"
             audio = narrate(script, api_key, voice)
-            with db:
-                db.execute("UPDATE briefings SET mp3=?, error=NULL WHERE cache_key=?", (audio, key))
+            review_store.save_briefing_audio(db, key, audio)
             log.info("briefing_ready case=%s lang=%s cache_key=%s bytes=%d", record["key"], lang, key[:12], len(audio))
             return True
         except (OSError, ValueError, TypeError, KeyError) as exc:
@@ -106,7 +102,5 @@ def generate(connect, database, key, record, approved, lang, config, api_key, vo
                      else f"{stage} could not generate the briefing")
             log.warning("briefing_failed case=%s lang=%s cache_key=%s stage=%s error=%s http=%s", record["key"],
                         lang, key[:12], stage, type(exc).__name__, getattr(exc, "code", None))
-            with db:
-                db.execute("""INSERT INTO briefings (cache_key, error) VALUES (?, ?)
-                    ON CONFLICT(cache_key) DO UPDATE SET error=excluded.error""", (key, error))
+            review_store.save_briefing_error(db, key, error)
             return False

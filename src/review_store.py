@@ -75,6 +75,22 @@ def added_cases(db):
 
 # Audio briefings, keyed by a hash of the approved summary and the generation settings.
 
+def get_briefing(db, cache_key):
+    return db.execute("SELECT script, mp3 FROM briefings WHERE cache_key=?", (cache_key,)).fetchone()
+
+
+def save_briefing_script(db, cache_key, script, evidence):
+    with db:
+        db.execute("""INSERT INTO briefings (cache_key, script, evidence)
+            VALUES (?, ?, ?) ON CONFLICT(cache_key) DO UPDATE
+            SET script=excluded.script, evidence=excluded.evidence, error=NULL""", (cache_key, script, evidence))
+
+
+def save_briefing_audio(db, cache_key, mp3):
+    with db:
+        db.execute("UPDATE briefings SET mp3=?, error=NULL WHERE cache_key=?", (mp3, cache_key))
+
+
 def briefing_status(db, cache_key):
     return db.execute("""SELECT script, evidence, mp3 IS NOT NULL AS ready, error
                          FROM briefings WHERE cache_key=?""", (cache_key,)).fetchone()
