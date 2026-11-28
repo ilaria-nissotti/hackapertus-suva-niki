@@ -149,13 +149,14 @@ test('long decisions show an excerpt until the reviewer expands them', async ({p
   await expect(casePane.getByText('Decision excerpt', {exact: true})).toBeVisible();
   await expect(casePane.getByText('Letzte Anordnung.', {exact: true})).toBeHidden();
   const toggle = casePane.getByRole('button', {name: 'Read full decision'});
-  const buttonTop = await toggle.evaluate(element => element.getBoundingClientRect().top + window.scrollY);
   await toggle.click();
   const collapse = casePane.getByRole('button', {name: 'Show less'});
   await expect(collapse).toHaveAttribute('aria-expanded', 'true');
-  expect(await collapse.evaluate(element => element.getBoundingClientRect().top + window.scrollY))
-    .toBeCloseTo(buttonTop);
-  await expect(casePane.getByText('Letzte Anordnung.', {exact: true})).toBeVisible();
+  const last = casePane.getByText('Letzte Anordnung.', {exact: true});
+  await expect(last).toBeVisible();
+  // "Show less" follows the whole decision instead of staying in the middle of it.
+  const lastBottom = (await last.boundingBox())!;
+  expect((await collapse.boundingBox())!.y).toBeGreaterThan(lastBottom.y + lastBottom.height);
 
   const card = (await casePane.boundingBox())!;
   await page.mouse.move(card.x + 60, Math.max(card.y + 60, 120));

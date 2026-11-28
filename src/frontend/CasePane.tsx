@@ -52,18 +52,27 @@ function DecisionPreview({text, language}: {text: string; language: string | nul
   const firstLines = text.split('\n', 12).join('\n').trimEnd();
   const excerpt = firstLines.length <= excerptLimit ? firstLines :
     firstLines.slice(0, excerptLimit + 1).replace(/\s+\S*$/, '').slice(0, excerptLimit).trimEnd();
-  return <div lang={language ?? undefined} className="decision-preview">
+  const preview = useRef<HTMLDivElement>(null);
+  function toggle() {
+    setExpanded(value => !value);
+    // Collapsing from the end of a long decision: bring its start back into view instead of leaving the reader lost.
+    if (expanded && preview.current && preview.current.getBoundingClientRect().top < 0) {
+      preview.current.scrollIntoView({block: 'start'});
+    }
+  }
+  return <div ref={preview} lang={language ?? undefined} className="decision-preview">
     {excerpt === text ? <RulingText text={text}/> : <>
       <p className="muted">Decision excerpt</p>
       <RulingText text={excerpt + ' …'}/>
-      <Button className="decision-toggle" variant="outline" aria-expanded={expanded}
-        aria-controls={continuationId} onClick={() => setExpanded(value => !value)}>
-        {expanded ? 'Show less' : 'Read full decision'}
-      </Button>
       <div id={continuationId} className="decision-continuation"
         data-expanded={expanded} aria-hidden={!expanded}>
         <div><RulingText text={text.slice(excerpt.length).trimStart()}/></div>
       </div>
+      {/* After the text: collapsed, it sits under the excerpt; expanded, at the end of the decision. */}
+      <Button className="decision-toggle" variant="outline" aria-expanded={expanded}
+        aria-controls={continuationId} onClick={toggle}>
+        {expanded ? 'Show less' : 'Read full decision'}
+      </Button>
     </>}
   </div>;
 }
