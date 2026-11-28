@@ -144,7 +144,6 @@ def test_library_indexes_approvals_by_language_and_replaces_old_text(client, cas
     assert search("Ersatzkennung") == [(case, "de")]
 
 
-@pending
 def test_case_search_boosts_citations_and_returns_explanations(client, case, tmp_path):
     cited = seed_kb(tmp_path / "kb.sqlite", "8C_72/2026", f"{SUVA_CASE}\n\nE. 2. {DE}")
     response = feature_response(client.post("/api/case-search", json={

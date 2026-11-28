@@ -263,6 +263,21 @@ def library_ask():
         {"key": key, "language": by_key[key]["lang"], "snippet": by_key[key]["snippet"]} for key in result["cited"]])
 
 
+@app.post("/api/case-search")
+def case_search_route():
+    import case_search
+
+    description = (request.get_json(silent=True) or {}).get("description")
+    if not isinstance(description, str) or not description.strip() or len(description) > 4000:
+        return jsonify(message="Describe the case in 1–4000 characters (facts, statutes, BGE)."), 400
+    with closing(connect()) as db:
+        extra = review_store.added_cases(db)
+    with closing(kb()) as repo:
+        records = review_kb.window_records(repo, window(), extra, include_text=True)
+        hits = case_search.search(records, repo.list_citations, repo.list_passages, description.strip())
+    return jsonify(hits=hits, searched=len(records))
+
+
 def prepare_briefing(key, lang):
     config = model_config()
     record = load_record(key)

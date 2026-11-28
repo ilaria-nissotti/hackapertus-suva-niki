@@ -61,3 +61,7 @@ export type LibraryPage = {hits: LibraryHit[]; total: number;
   facets: {statute: Facet[]; topic: Facet[]; outcome: Facet[]; language: Facet[]}};
 export type LibraryAnswer = {answer: string | null; message?: string;
   cited: {key: string; language: string; snippet: string}[]};
+export type CaseSearchHit = {
+  key: string; docket: string; title: string; decision_date: string | null; status: string; relevance: number;
+  matches: {kind: string; value: string}[]; highlights: string[];
+};

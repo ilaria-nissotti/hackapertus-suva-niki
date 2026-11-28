@@ -3,6 +3,7 @@ import type {FormEvent, MouseEvent} from 'react';
 import {createRoot} from 'react-dom/client';
 import {CasePane, Status, views} from './CasePane';
 import {Library} from './Library';
+import {CaseSearch} from './CaseSearch';
 import type {View} from './CasePane';
 import {displayDate, judgmentSubject} from './api';
 import {Button, Collapsible, Input} from './components/ui/controls';
@@ -29,7 +30,7 @@ function App() {
   const actionLock = useRef(false);
   const params = new URLSearchParams(url);
   const caseKey = params.get('case');
-  const screen = params.get('screen') === 'library' ? 'library' : 'queue';
+  const screen = ['library', 'precedents'].find(value => value === params.get('screen')) ?? 'queue';
   const lang: Language = params.get('lang') === 'fr' ? 'fr' : 'de';
   const view = views.find(value => value === params.get('view')) ??
     (location.hash === '#case-briefing' ? 'Legal summaries' : 'Overview');
@@ -154,12 +155,14 @@ function App() {
         <a className="brand" href="/" onClick={follow}><span aria-hidden="true">§</span> Judgment Review</a>
         <nav className="sections" aria-label="Sections">
           <a href="/" onClick={follow} aria-current={screen === 'queue' ? 'page' : undefined}>Review queue</a>
+          <a href="/?screen=precedents" onClick={follow} aria-current={screen === 'precedents' ? 'page' : undefined}>Find precedents</a>
           <a href="/?screen=library" onClick={follow} aria-current={screen === 'library' ? 'page' : undefined}>Library</a>
         </nav>
         <span className="challenge">Suva</span>
       </div>
     </header>
     {screen === 'library' ? <main><Library params={params} link={link} follow={follow} navigate={navigate}/></main> :
+     screen === 'precedents' ? <main><CaseSearch follow={follow}/></main> :
     <main>
       <div className="headline">
         <h1>Federal Court judgments</h1>
