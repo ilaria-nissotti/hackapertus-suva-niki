@@ -95,7 +95,8 @@ Those keys are line IDs. Capture procedural posture and cite only provisions
 in the source."""
     for request in ("", "Include evidence_ids copied from the JSON keys of substantive judgment lines."):
         try:
-            result = ask(config, instruction, {"judgment_lines": source_passages}, 1400, request=request)
+            # Give longer rulings enough output space to finish the brief and its evidence IDs.
+            result = ask(config, instruction, {"judgment_lines": source_passages}, 2800, request=request)
         except ValueError:
             if request:
                 raise
@@ -126,9 +127,10 @@ Compose directly in this language from the original and factual brief.
 Use examples for style only. Preserve procedural posture, the legal test,
 the court's reasoning and outcome. Do not invent facts, citations or holdings.
 For every pair in "terminology", use its "{lang}" term, never the other language's.
-Return a JSON object with keys "summary" (plain text with paragraphs, using JSON
-escaped newlines) and "evidence_ids" (array of source line numbers supporting
-the central reasoning). The first output character must be {{."""
+Return a JSON object with exactly two keys. First, "evidence_ids": an array of
+one to four distinct line IDs from judgment_lines that best support the central
+reasoning. Close the array after at most four IDs. Then, "summary": plain text
+with paragraphs, using JSON escaped newlines. The first output character must be {{."""
     data = {
         "judgment_lines": source_passages, "factual_brief": facts,
         "style_examples": similar_examples(source, lang, record["docket"], examples),
@@ -139,7 +141,7 @@ the central reasoning). The first output character must be {{."""
             # A shorter prompt makes the language instruction more prominent on retry.
             data["style_examples"] = data["style_examples"][:1]
         try:
-            result = ask(config, instruction + reminder, data, 1600, request=request)
+            result = ask(config, instruction + reminder, data, 3200, request=request)
         except ValueError:
             if reminder:
                 raise

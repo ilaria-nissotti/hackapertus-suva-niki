@@ -25,7 +25,7 @@ function setup({denyMic = false, blockAutoplay = false, request, recording} = {}
   root.dataset = {case: "8C_354/2026", lang: "de", ask: "ask",
     speak: "speak", transcribe: "transcribe", recap: "recap"};
   const calls = [], events = {}, logs = [];
-  let tracksStopped = 0, pauses = 0, revoked = 0, stopTimer;
+  let tracksStopped = 0, pauses = 0, revoked = 0, stopTimer, currentPlayer;
   class Recorder {
     static isTypeSupported() { return true; }
     constructor() { this.state = "inactive"; this.mimeType = "audio/webm"; }
@@ -37,6 +37,7 @@ function setup({denyMic = false, blockAutoplay = false, request, recording} = {}
     }
   }
   class Player extends Element {
+    constructor() { super(); currentPlayer = this; }
     async play() { if (blockAutoplay) throw new Error("Autoplay blocked"); }
     pause() { pauses++; }
   }
@@ -67,6 +68,7 @@ function setup({denyMic = false, blockAutoplay = false, request, recording} = {}
   });
   return {byId, calls, events, logs, dispose, tracks: () => tracksStopped,
     pauses: () => pauses, revoked: () => revoked, timeout: () => stopTimer(),
+    finishPlayback() { currentPlayer.ended = true; currentPlayer.events.ended(); },
     async record() { await byId("chat-mic").click(); await byId("chat-mic").click(); }};
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -102,6 +104,7 @@ test("permission errors, follow-up history, and recap freshness", async () => {
   assert.equal(ui.byId("recap-panel").hidden, false);
   await ui.byId("chat-recap").click();
   await ui.byId("chat-tab").click();
+  ui.finishPlayback();
   await ui.record();
   await flush();
   const answers = ui.calls.filter(call => call.action === "ask");
@@ -110,6 +113,32 @@ test("permission errors, follow-up history, and recap freshness", async () => {
   await ui.byId("chat-clear").click();
   assert.equal(ui.byId("chat-turns").children.length, 0);
   assert.equal(ui.byId("chat-recap").disabled, true);
+});
+
+test("follow-up waits for playback to finish or be explicitly stopped", async () => {
+  let transcriptions = 0;
+  const ui = setup({request: action => action === "transcribe" && ++transcriptions === 2
+    ? {transcript: "Wer trägt die Gerichtskosten?"} : undefined});
+  await ui.record();
+  await flush();
+  assert.equal(ui.byId("chat-mic").disabled, true);
+  assert.equal(ui.byId("chat-stop-audio").hidden, false);
+  await ui.byId("chat-mic").click();
+  assert.equal(ui.pauses(), 0);
+  assert.deepEqual(actions(ui), ["transcribe", "ask", "speak"]);
+
+  await ui.byId("chat-stop-audio").click();
+  assert.equal(ui.pauses(), 1);
+  assert.equal(ui.byId("chat-mic").disabled, false);
+  await ui.record();
+  await flush();
+  const second = ui.calls.filter(call => call.action === "ask")[1];
+  assert.equal(second.payload.question, "Wer trägt die Gerichtskosten?");
+  assert.equal(second.payload.history[0].question, "Was entschied das Gericht?");
+  ui.finishPlayback();
+  assert.equal(ui.byId("chat-stop-audio").hidden, true);
+  assert.equal(ui.byId("chat-mic").disabled, false);
+  assert.equal(ui.byId("chat-status").textContent, "Ready");
 });
 
 test("navigation stops mic and playback, and clearing discards late requests", async () => {
@@ -185,7 +214,7 @@ test("limit: a recording of exactly 3 MB is uploaded", async () => {
 
 test("limit: only the last six turns are kept and sent as history", async () => {
   const ui = setup();
-  for (let i = 0; i < 8; i++) { await ui.record(); await flush(); }
+  for (let i = 0; i < 8; i++) { await ui.record(); await flush(); ui.finishPlayback(); }
   assert.equal(ui.byId("chat-turns").children.length, 6);
   const asks = ui.calls.filter(call => call.action === "ask");
   assert.equal(asks.length, 8);

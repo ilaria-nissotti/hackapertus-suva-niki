@@ -104,8 +104,10 @@ reasoning rather than headings or party arguments.
 "court" requires source lines that directly support the answer.
 "score" explains the app's rules-based score in app_score (the reasons are the
 rules that fired) and clearly attributes it to the app. For a court finding in a score explanation cite the ruling too.
-When the source does not establish the answer, use "uncertain". No legal advice,
-invented findings, cross-case claims, or actions. History is context only.""",
+Answer the latest question directly in the first sentence. Use history only to
+resolve references in that question. Avoid recapping earlier answers unless
+the user asks for a recap. When the source does not establish the answer, use
+"uncertain". No legal advice, invented findings, cross-case claims, or actions.""",
                  {"question": question, "judgment_lines": source, "history": history,
                   "app_score": rating if score_question else None}, 550)
     kind = result.get("kind")

@@ -52,7 +52,12 @@ def chat(config, messages, max_tokens):
     llm = LLMClient(config["settings"])
     try:
         with llm.client:
-            return llm.chat(messages, prompt_version="review-json", max_tokens=max_tokens).text
+            return llm.chat(
+                messages,
+                prompt_version="review-json",
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            ).text
     except APIError as exc:
         status = getattr(exc, "status_code", None)
         error = OSError(f"Apertus HTTP {status}" if status else "Apertus request failed")

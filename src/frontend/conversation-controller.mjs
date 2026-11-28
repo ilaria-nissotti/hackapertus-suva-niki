@@ -3,6 +3,7 @@ const tabHistory = new Map();
 export function mountConversation(root) {
   const byId = id => root.querySelector(`#${id}`);
   const mic = byId("chat-mic");
+  const stopButton = byId("chat-stop-audio");
   const status = byId("chat-status");
   const summaryButton = byId("chat-recap");
   const scope = {case: root.dataset.case, lang: root.dataset.lang};
@@ -38,9 +39,19 @@ export function mountConversation(root) {
   }
 
   function stopAudio() {
-    if (audioPlayer) audioPlayer.pause();
+    const player = audioPlayer;
     audioPlayer = undefined;
+    if (player && !player.ended) player.pause();
     root.removeAttribute("data-chat-playing");
+  }
+
+  function renderCallControls() {
+    const recording = recorder?.state === "recording";
+    mic.disabled = !speechAvailable || Boolean(audioPlayer) || (busy && !recording);
+    mic.textContent = recording ? "Send question" : turns.length ? "Ask follow-up" : "Start case call";
+    stopButton.hidden = !root.hasAttribute("data-chat-playing");
+    root.toggleAttribute("data-chat-recording", recording);
+    byId("recap-tab").disabled = recording;
   }
 
   function render() {
@@ -63,11 +74,7 @@ export function mountConversation(root) {
       list.append(item);
     }
     byId("chat-clear").hidden = !turns.length && !busy;
-    mic.disabled = !speechAvailable || (busy && recorder?.state !== "recording");
-    mic.textContent = recorder?.state === "recording" ? "Send question" :
-      turns.length ? "Ask follow-up" : "Start case call";
-    root.toggleAttribute("data-chat-recording", recorder?.state === "recording");
-    byId("recap-tab").disabled = recorder?.state === "recording";
+    renderCallControls();
     summaryButton.disabled = busy || !turns.length;
     summaryButton.textContent = recap ? "Refresh summary" : "Generate summary";
     const panel = byId("chat-recap-result");
@@ -124,19 +131,23 @@ export function mountConversation(root) {
     const player = audioPlayer;
     player.addEventListener("ended", () => {
       if (audioPlayer === player) {
-        root.removeAttribute("data-chat-playing");
-        if (!busy) status.textContent = "Ready";
+        stopAudio();
+        renderCallControls();
+        if (status.textContent === "Speaking…") status.textContent = "Ready";
       }
     });
     try {
       await player.play();
-      if (token === epoch) {
+      if (token === epoch && audioPlayer === player) {
         root.setAttribute("data-chat-playing", "");
         status.textContent = "Speaking…";
       }
     } catch (error) {
       console.info("conversation_autoplay_blocked", {case: scope.case, reason: error?.message});
-      if (token === epoch) status.textContent = "Select Play answer to listen.";
+      if (audioPlayer === player) {
+        stopAudio();
+        status.textContent = "Select Play answer to listen.";
+      }
     }
   }
 
@@ -169,7 +180,7 @@ export function mountConversation(root) {
     await speak(turn, token, signal);
   }
 
-  async function submit(recording) {
+  async function submit(recording, reachedTimeLimit) {
     const token = epoch;
     controller = new AbortController();
     const signal = controller.signal;
@@ -178,7 +189,7 @@ export function mountConversation(root) {
       const data = new FormData();
       for (const [key, value] of Object.entries(scope)) data.append(key, value);
       data.append("audio", recording, "question");
-      setBusy(true, "Transcribing…");
+      setBusy(true, reachedTimeLimit ? "30-second limit reached. Transcribing…" : "Transcribing…");
       const {transcript} = await call("transcribe", data, signal);
       if (token !== epoch) return;
       await ask(transcript, token, signal);
@@ -198,8 +209,7 @@ export function mountConversation(root) {
 
   mic.addEventListener("click", async () => {
     if (recorder?.state === "recording") { recorder.stop(); return; }
-    if (busy) return;
-    stopAudio();
+    if (busy || audioPlayer) return;
     const token = epoch;
     setBusy(true, "Opening microphone…");
     try {
@@ -211,12 +221,13 @@ export function mountConversation(root) {
       const current = new MediaRecorder(stream, mimeType ? {mimeType} : {});
       recorder = current;
       const chunks = [];
+      let reachedTimeLimit = false;
       current.ondataavailable = event => chunks.push(event.data);
       current.onstop = () => {
         if (token !== epoch || recorder !== current) return;
         releaseMic();
         recorder = undefined;
-        submit(new Blob(chunks, {type: current.mimeType || chunks[0]?.type}));
+        submit(new Blob(chunks, {type: current.mimeType || chunks[0]?.type}), reachedTimeLimit);
       };
       current.onerror = () => {
         if (token !== epoch) return;
@@ -225,7 +236,11 @@ export function mountConversation(root) {
         setBusy(false, "Recording failed. Try starting another call.");
       };
       current.start();
-      timer = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 30000);
+      timer = window.setTimeout(() => {
+        if (current.state !== "recording") return;
+        reachedTimeLimit = true;
+        current.stop();
+      }, 30000);
       setBusy(true, "Listening… Select Send question when you’re done.");
     } catch (error) {
       report("microphone", error);
@@ -234,6 +249,12 @@ export function mountConversation(root) {
       recorder = undefined;
       setBusy(false, "Microphone unavailable. Check browser permissions and try again.");
     }
+  });
+
+  stopButton.addEventListener("click", () => {
+    stopAudio();
+    renderCallControls();
+    if (status.textContent === "Speaking…") status.textContent = "Playback stopped. Ask a follow-up or replay the answer.";
   });
 
   function cancel() {

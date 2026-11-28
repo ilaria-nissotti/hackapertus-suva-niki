@@ -23,7 +23,8 @@ export function Conversation({caseKey, lang}: {caseKey: string; lang: Language})
           <img src="/conversation-portrait" alt="" onError={event => {event.currentTarget.hidden = true;}}/>
         </div>
         <button type="button" id="chat-mic" className="call-button" aria-describedby="chat-status">Start case call</button>
-        <p className="muted">Your microphone audio goes to ElevenLabs for transcription.</p>
+        <button type="button" id="chat-stop-audio" hidden>Stop playback</button>
+        <p className="muted">Questions can be up to 30 seconds. Audio goes to ElevenLabs for transcription.</p>
       </div>
       <ol className="chat-turns" id="chat-turns" aria-label="Questions and answers" lang={lang}/>
       <button type="button" id="chat-clear" hidden>Clear conversation</button>
