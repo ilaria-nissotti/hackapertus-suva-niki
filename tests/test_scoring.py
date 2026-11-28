@@ -7,7 +7,7 @@ from suva.scoring import analyze
 from suva.scoring.dataset import build_dataset, load_dataset
 from suva.scoring.evaluate import evaluate
 from suva.scoring.fit import fit_weights
-from suva.scoring.judge import excerpt, judge_record, parse_verdict
+from suva.scoring.judge import Verdict, compare_with_judge, excerpt, judge_record, parse_verdict
 from suva.scoring.rules import DEFAULT_RULES_PATH, RulesError, load_rules, parse_rules
 from suva.scoring.score import score_record
 from suva.sources.base import SourceRecord
@@ -303,3 +303,18 @@ def test_score_window_stores_scores_with_explanations(repo):
     assert stored["band"] == "high" and [f["id"] for f in stored["fired"]] == ["suva", "uvg"]
     assert stored["fired"][0]["explanation"] == "Suva is a party."
     assert repo.get_score("8C_11/2026@2025-01-01") is None
+
+
+def test_compare_with_judge_counts_recall_over_all_relevant_judgements():
+    from types import SimpleNamespace
+
+    a, b, c, missed = ({"key": k, "relevant": rel} for k, rel in (("a", 1), ("b", 0), ("c", 1), ("missed", 1)))
+    candidates = [(a, SimpleNamespace(score=80)), (b, SimpleNamespace(score=60)), (c, SimpleNamespace(score=20))]
+    verdicts = [(a, Verdict("a", "low", "", 80, False)), (b, Verdict("b", "high", "", 60, False)),
+                (c, Verdict("c", "medium", "", 20, False)), (missed, Verdict("missed", None, "", 10, False, "bad"))]
+    rows = {r["name"]: r for r in compare_with_judge([a, b, c, missed], candidates, verdicts, threshold=50)}
+    assert rows["rules only"] == {"name": "rules only", "flagged": 2, "precision": 0.5, "recall": 1 / 3}
+    assert (rows["judge only (high/medium)"]["flagged"], rows["judge only (high/medium)"]["precision"]) == (2, 0.5)
+    assert rows["rules AND judge"]["flagged"] == 1 and rows["rules AND judge"]["precision"] == 0.0
+    assert rows["rules OR judge"]["flagged"] == 3 and rows["rules OR judge"]["recall"] == 2 / 3
+    assert compare_with_judge([], [], [], 50)[0] == {"name": "rules only", "flagged": 0, "precision": 0.0, "recall": 0.0}

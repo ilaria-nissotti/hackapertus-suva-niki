@@ -88,3 +88,27 @@ def judge_record(llm: LLMClient, record: dict[str, Any], ruleset: RuleSet, rules
                       model=ruleset.judge.get("model") or None)
     level, reason, error = parse_verdict(result.text)
     return Verdict(record["key"], level, reason, rules_score, result.cached, error)
+
+
+def compare_with_judge(
+    records: list[dict[str, Any]], candidates: list[tuple[dict[str, Any], Any]],
+    verdicts: list[tuple[dict[str, Any], Verdict]], threshold: float,
+) -> list[dict[str, Any]]:
+    """Precision and recall of the rules, the judge (high/medium) and both combined.
+
+    `candidates` are (record, rules score) pairs and `verdicts` (record, verdict) pairs for the judged candidates.
+    Recall counts every relevant judgement in `records`, not only the candidates.
+    """
+    usable = [(r, v) for r, v in verdicts if v.relevance]
+    n_rel = sum(r["relevant"] for r in records)
+    rows = []
+    for name, flagged in (
+        ("rules only", [r for r, s in candidates if s.score >= threshold]),
+        ("judge only (high/medium)", [r for r, v in usable if v.relevant]),
+        ("rules AND judge", [r for r, v in usable if v.relevant and v.rules_score >= threshold]),
+        ("rules OR judge", [r for r, v in usable if v.relevant or v.rules_score >= threshold]),
+    ):
+        tp = sum(r["relevant"] for r in flagged)
+        rows.append({"name": name, "flagged": len(flagged), "precision": tp / len(flagged) if flagged else 0.0,
+                     "recall": tp / n_rel if n_rel else 0.0})
+    return rows

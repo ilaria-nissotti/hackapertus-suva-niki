@@ -281,7 +281,7 @@ def cmd_fit_weights(args: argparse.Namespace) -> int:
 def cmd_judge(args: argparse.Namespace) -> int:
     from suva.llm import LLMClient
     from suva.scoring.dataset import load_dataset
-    from suva.scoring.judge import judge_record
+    from suva.scoring.judge import compare_with_judge, judge_record
     from suva.scoring.rules import load_rules
     from suva.scoring.score import score_record
 
@@ -313,18 +313,9 @@ def cmd_judge(args: argparse.Namespace) -> int:
             print(f"  [{i}/{len(candidates)}] {rec['key']:<28} rules {s.score:>5.1f}  judge {v.relevance or v.error}"
                   f"{'  (cached)' if v.cached else ''}")
 
-    usable = [(r, v) for r, v in verdicts if v.relevance]
-    n_rel = sum(r["relevant"] for r in records)
-    for name, flagged in (
-        ("rules only", [r for r, s in candidates if s.score >= ruleset.threshold]),
-        ("judge only (high/medium)", [r for r, v in usable if v.relevant]),
-        ("rules AND judge", [r for r, v in usable if v.relevant and v.rules_score >= ruleset.threshold]),
-        ("rules OR judge", [r for r, v in usable if v.relevant or v.rules_score >= ruleset.threshold]),
-    ):
-        tp = sum(r["relevant"] for r in flagged)
-        prec = tp / len(flagged) if flagged else 0.0
-        rec_ = tp / n_rel if n_rel else 0.0
-        print(f"  {name:<26} flagged {len(flagged):>4}  precision {prec:>4.0%}  recall {rec_:>4.0%}")
+    for row in compare_with_judge(records, candidates, verdicts, ruleset.threshold):
+        print(f"  {row['name']:<26} flagged {row['flagged']:>4}  precision {row['precision']:>4.0%}  "
+              f"recall {row['recall']:>4.0%}")
     print(f"\nverdicts: {out}")
     return 0
 
